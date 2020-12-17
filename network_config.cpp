@@ -24,7 +24,11 @@ void writeDHCPDefault(const std::string& filename, const std::string& interface)
 #else
                 "LinkLocalAddressing=no\n"
 #endif
+#ifdef IPV6_ACCEPT_RA
+                "IPv6AcceptRA=true\n"
+#else
                 "IPv6AcceptRA=false\n"
+#endif
                 "[DHCP]\nClientIdentifier=mac\n";
     filestream.close();
 }
