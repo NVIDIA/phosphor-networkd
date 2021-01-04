@@ -897,8 +897,25 @@ void EthernetInterface::writeConfigurationFile()
 #else
     stream << "LinkLocalAddressing=no\n";
 #endif
-    stream << std::boolalpha
-           << "IPv6AcceptRA=" << EthernetInterfaceIntf::iPv6AcceptRA() << "\n";
+
+    /* Workaround: To clear IPv6 DHCP address.
+       On switching IPv6 address from DHCP to Static doesn't clear
+       the DHCP address on the network interface.
+       To clear the DHCP address disable IPv6AcceptRA in static mode
+    */
+    if (dhcpIsEnabled(IP::Protocol::IPv6, false))
+    {
+#ifdef IPV6_ACCEPT_RA
+        stream << "IPv6AcceptRA=true\n";
+#else
+        stream << std::boolalpha
+               << "IPv6AcceptRA=" << EthernetInterfaceIntf::iPv6AcceptRA() << "\n";
+#endif
+    }
+    else
+    {
+        stream << "IPv6AcceptRA=false\n";
+    }
 
     // Add the VLAN entry
     for (const auto& intf : vlanInterfaces)
