@@ -113,6 +113,17 @@ if test "x$enable_link_local_autoconfiguration" = "xyes"; then
     AC_DEFINE([LINK_LOCAL_AUTOCONFIGURATION], [1], [Enable link-local IP address autoconfiguration])
 fi
 
+# If set, enables IPv6 Router Advertisement (RA) reception support for the interface.
+AC_ARG_ENABLE(
+    [ipv6-router-advertisement],
+    AS_HELP_STRING([--enable-ipv6-router-advertisement], [Enable IPv6 Router Advertisement reception support]),
+    [enable_ipv6_router_advertisement="yes"],
+    []
+)
+if test "x$enable_ipv6_router_advertisement" = "xyes"; then
+    AC_DEFINE([IPV6_ACCEPT_RA], [1], [Enable IPv6 Router Advertisement reception support])
+fi
+
 DEFAULT_BUSNAME='xyz.openbmc_project.Network'
 AC_DEFINE_UNQUOTED([DEFAULT_BUSNAME], ["$DEFAULT_BUSNAME"], [The DBus busname to own])
 AC_SUBST(DEFAULT_BUSNAME, ["$DEFAULT_BUSNAME"])
