@@ -57,10 +57,12 @@ TEST_F(TestUtil, IpToString)
 {
     struct in_addr ip1;
     EXPECT_EQ(1, inet_pton(AF_INET, "192.168.10.1", &ip1));
+    EXPECT_EQ("192.168.10.1", toString(ip1));
     EXPECT_EQ("192.168.10.1", toString(InAddrAny(ip1)));
 
     struct in6_addr ip2;
     EXPECT_EQ(1, inet_pton(AF_INET6, "fdd8:b5ad:9d93:94ee::2:1", &ip2));
+    EXPECT_EQ("fdd8:b5ad:9d93:94ee::2:1", toString(ip2));
     EXPECT_EQ("fdd8:b5ad:9d93:94ee::2:1", toString(InAddrAny(ip2)));
 }
 
@@ -162,8 +164,48 @@ TEST_F(TestUtil, convertV6MasktoPrefix)
     prefix = toCidr(AF_INET6, mask);
     EXPECT_EQ(prefix, 38);
 
-    // Invalid Mask
+    mask = "ffff:0:0:0:0:0:0:0";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 16);
+
+    mask = "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 128);
+
+    mask = "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffc";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 126);
+
+    mask = "ffff:ffff:ffff:ffff::";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 64);
+
+    // Invalid Masks
     mask = "ffff:0fff::";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 0);
+
+    mask = "ffff:fgff::";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 0);
+
+    mask = "ffff:0:0:6:0:0:0:0";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 0);
+
+    mask = "::";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 0);
+
+    mask = ":";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 0);
+
+    mask = "abcd:efgh:ijkl:mnop:pqrs:tuvw:xyz:abcd";
+    prefix = toCidr(AF_INET6, mask);
+    EXPECT_EQ(prefix, 0);
+
+    mask = "ffff:0:0:0:0:0:0";
     prefix = toCidr(AF_INET6, mask);
     EXPECT_EQ(prefix, 0);
 }

@@ -25,7 +25,7 @@ using EthernetInterfaceIntf =
 
 constexpr auto IPV4_MIN_PREFIX_LENGTH = 1;
 constexpr auto IPV4_MAX_PREFIX_LENGTH = 32;
-constexpr auto IPV6_MAX_PREFIX_LENGTH = 64;
+constexpr auto IPV6_MAX_PREFIX_LENGTH = 128;
 constexpr auto IPV4_PREFIX = "169.254";
 constexpr auto IPV6_PREFIX = "fe80";
 
@@ -98,6 +98,8 @@ InAddrAny addrFromBuf(int addressFamily, std::string_view buf);
  * @returns String representation of the ip.
  */
 std::string toString(const InAddrAny& addr);
+std::string toString(const struct in_addr& addr);
+std::string toString(const struct in6_addr& addr);
 
 /* @brief converts the prefix into subnetmask.
  * @param[in] addressFamily - IP address family(AF_INET/AF_INET6).

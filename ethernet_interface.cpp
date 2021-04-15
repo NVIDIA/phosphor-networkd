@@ -5,6 +5,7 @@
 #include "config_parser.hpp"
 #include "neighbor.hpp"
 #include "network_manager.hpp"
+#include "routing_table.hpp"
 #include "vlan_interface.hpp"
 
 #include <arpa/inet.h>
@@ -84,6 +85,32 @@ EthernetInterface::EthernetInterface(sdbusplus::bus::bus& bus,
     interfaceName(intfName);
     EthernetInterfaceIntf::dHCPEnabled(dhcpEnabled);
     EthernetInterfaceIntf::iPv6AcceptRA(getIPv6AcceptRAFromConf());
+    route::Table routingTable;
+    auto gatewayList = routingTable.getDefaultGateway();
+    auto gateway6List = routingTable.getDefaultGateway6();
+    std::string defaultGateway;
+    std::string defaultGateway6;
+
+    for (auto& gateway : gatewayList)
+    {
+        if (gateway.first == intfName)
+        {
+            defaultGateway = gateway.second;
+            break;
+        }
+    }
+
+    for (auto& gateway6 : gateway6List)
+    {
+        if (gateway6.first == intfName)
+        {
+            defaultGateway6 = gateway6.second;
+            break;
+        }
+    }
+
+    EthernetInterfaceIntf::defaultGateway(defaultGateway);
+    EthernetInterfaceIntf::defaultGateway6(defaultGateway6);
     // Don't get the mac address from the system as the mac address
     // would be same as parent interface.
     if (intfName.find(".") == std::string::npos)
@@ -729,14 +756,42 @@ ServerList EthernetInterface::getNameServerFromResolvd()
     auto tupleVector = std::get_if<type>(&name);
     for (auto i = tupleVector->begin(); i != tupleVector->end(); ++i)
     {
-        std::vector<uint8_t> ipaddress = std::get<1>(*i);
-        std::string address;
-        for (auto byte : ipaddress)
+        int addressFamily = std::get<0>(*i);
+        std::vector<uint8_t>& ipaddress = std::get<1>(*i);
+
+        switch (addressFamily)
         {
-            address += std::to_string(byte) + ".";
+            case AF_INET:
+                if (ipaddress.size() == sizeof(struct in_addr))
+                {
+                    servers.push_back(toString(
+                        *reinterpret_cast<struct in_addr*>(ipaddress.data())));
+                }
+                else
+                {
+                    log<level::ERR>(
+                        "Invalid data recived from Systemd-Resolved");
+                }
+                break;
+
+            case AF_INET6:
+                if (ipaddress.size() == sizeof(struct in6_addr))
+                {
+                    servers.push_back(toString(
+                        *reinterpret_cast<struct in6_addr*>(ipaddress.data())));
+                }
+                else
+                {
+                    log<level::ERR>(
+                        "Invalid data recived from Systemd-Resolved");
+                }
+                break;
+
+            default:
+                log<level::ERR>(
+                    "Unsupported address family in DNS from Systemd-Resolved");
+                break;
         }
-        address.pop_back();
-        servers.push_back(address);
     }
     return servers;
 }
@@ -956,6 +1011,20 @@ void EthernetInterface::writeConfigurationFile()
         }
     }
 
+    auto gateway = EthernetInterfaceIntf::defaultGateway();
+    if (!gateway.empty())
+    {
+        stream << "[Route]\n";
+        stream << "Gateway=" << gateway << "\n";
+    }
+
+    auto gateway6 = EthernetInterfaceIntf::defaultGateway6();
+    if (!gateway6.empty())
+    {
+        stream << "[Route]\n";
+        stream << "Gateway=" << gateway6 << "\n";
+    }
+
     if (manager.getSystemConf())
     {
         const auto& gateway = manager.getSystemConf()->defaultGateway();
@@ -1085,5 +1154,44 @@ void EthernetInterface::deleteAll()
     manager.writeToConfigurationFile();
 }
 
+std::string EthernetInterface::defaultGateway(std::string gateway)
+{
+    auto gw = EthernetInterfaceIntf::defaultGateway();
+    if (gw == gateway)
+    {
+        return gw;
+    }
+
+    if (!isValidIP(AF_INET, gateway))
+    {
+        log<level::ERR>("Not a valid v4 Gateway",
+                        entry("GATEWAY=%s", gateway.c_str()));
+        elog<InvalidArgument>(Argument::ARGUMENT_NAME("GATEWAY"),
+                              Argument::ARGUMENT_VALUE(gateway.c_str()));
+    }
+    gw = EthernetInterfaceIntf::defaultGateway(gateway);
+    manager.writeToConfigurationFile();
+    return gw;
+}
+
+std::string EthernetInterface::defaultGateway6(std::string gateway)
+{
+    auto gw = EthernetInterfaceIntf::defaultGateway6();
+    if (gw == gateway)
+    {
+        return gw;
+    }
+
+    if (!isValidIP(AF_INET6, gateway))
+    {
+        log<level::ERR>("Not a valid v6 Gateway",
+                        entry("GATEWAY=%s", gateway.c_str()));
+        elog<InvalidArgument>(Argument::ARGUMENT_NAME("GATEWAY"),
+                              Argument::ARGUMENT_VALUE(gateway.c_str()));
+    }
+    gw = EthernetInterfaceIntf::defaultGateway6(gateway);
+    manager.writeToConfigurationFile();
+    return gw;
+}
 } // namespace network
 } // namespace phosphor

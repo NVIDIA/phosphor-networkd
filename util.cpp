@@ -37,59 +37,54 @@ namespace fs = std::filesystem;
 
 uint8_t toV6Cidr(const std::string& subnetMask)
 {
-    uint8_t pos = 0;
-    uint8_t prevPos = 0;
-    uint8_t cidr = 0;
-    uint16_t buff{};
-    do
+    struct in6_addr subnet;
+    int ret = inet_pton(AF_INET6, subnetMask.c_str(), &subnet);
+    if (ret != 1)
     {
-        // subnet mask look like ffff:ffff::
-        // or ffff:c000::
-        pos = subnetMask.find(":", prevPos);
-        if (pos == std::string::npos)
-        {
-            break;
-        }
+        log<level::ERR>("Invalid Mask",
+                        entry("SUBNETMASK=%s", subnetMask.c_str()));
+        return 0;
+    }
 
-        auto str = subnetMask.substr(prevPos, (pos - prevPos));
-        prevPos = pos + 1;
-
-        // String length is 0
-        if (!str.length())
-        {
-            return cidr;
-        }
-        // converts it into number.
-        if (sscanf(str.c_str(), "%hx", &buff) <= 0)
+    uint8_t cidr = 0;
+    bool zeroesFound = false;
+    int bitsSet, trailingZeroes;
+    for (int lv = 0; lv < 4; lv++)
+    {
+        subnet.s6_addr32[lv] = be32toh(subnet.s6_addr32[lv]);
+        bitsSet = __builtin_popcount(subnet.s6_addr32[lv]);
+        if (zeroesFound && bitsSet)
         {
             log<level::ERR>("Invalid Mask",
                             entry("SUBNETMASK=%s", subnetMask.c_str()));
-
             return 0;
         }
 
-        // convert the number into bitset
-        // and check for how many ones are there.
-        // if we don't have all the ones then make
-        // sure that all the ones should be left justify.
-
-        if (__builtin_popcount(buff) != 16)
+        // The __builtin_ctz function returns -1 when the value is 0 on arm.
+        // GCC's doc specifies that:
+        //  If x is 0, the result is undefined.
+        //  https://gcc.gnu.org/onlinedocs/gcc-10.2.0/gcc/Other-Builtins.html
+        // So we could not rely on the undefined behavior.
+        // Handling the 0 case specifically fixes the issue.
+        if (subnet.s6_addr32[lv] == 0)
         {
-            if (((sizeof(buff) * 8) - (__builtin_ctz(buff))) !=
-                __builtin_popcount(buff))
-            {
-                log<level::ERR>("Invalid Mask",
-                                entry("SUBNETMASK=%s", subnetMask.c_str()));
-
-                return 0;
-            }
-            cidr += __builtin_popcount(buff);
-            return cidr;
+            trailingZeroes = 32;
         }
+        else
+        {
+            trailingZeroes = __builtin_ctz(subnet.s6_addr32[lv]);
+        }
+        zeroesFound |= trailingZeroes;
 
-        cidr += 16;
-    } while (1);
-
+        if (bitsSet + trailingZeroes != 32)
+        {
+            // There are '1' bits interspersed with '0' bits
+            log<level::ERR>("Invalid Mask",
+                            entry("SUBNETMASK=%s", subnetMask.c_str()));
+            return 0;
+        }
+        cidr += bitsSet;
+    }
     return cidr;
 }
 } // anonymous namespace
@@ -176,33 +171,44 @@ InAddrAny addrFromBuf(int addressFamily, std::string_view buf)
     throw std::runtime_error("Unsupported address family");
 }
 
+std::string toString(const struct in_addr& addr)
+{
+    std::string ip(INET_ADDRSTRLEN, '\0');
+    if (inet_ntop(AF_INET, &addr, ip.data(), ip.size()) == nullptr)
+    {
+        throw std::runtime_error("Failed to convert IP4 to string");
+    }
+
+    ip.resize(strlen(ip.c_str()));
+    return ip;
+}
+
+std::string toString(const struct in6_addr& addr)
+{
+    std::string ip(INET6_ADDRSTRLEN, '\0');
+    if (inet_ntop(AF_INET6, &addr, ip.data(), ip.size()) == nullptr)
+    {
+        throw std::runtime_error("Failed to convert IP6 to string");
+    }
+
+    ip.resize(strlen(ip.c_str()));
+    return ip;
+}
+
 std::string toString(const InAddrAny& addr)
 {
-    std::string ip;
     if (std::holds_alternative<struct in_addr>(addr))
     {
         const auto& v = std::get<struct in_addr>(addr);
-        ip.resize(INET_ADDRSTRLEN);
-        if (inet_ntop(AF_INET, &v, ip.data(), ip.size()) == NULL)
-        {
-            throw std::runtime_error("Failed to convert IP4 to string");
-        }
+        return toString(v);
     }
     else if (std::holds_alternative<struct in6_addr>(addr))
     {
         const auto& v = std::get<struct in6_addr>(addr);
-        ip.resize(INET6_ADDRSTRLEN);
-        if (inet_ntop(AF_INET6, &v, ip.data(), ip.size()) == NULL)
-        {
-            throw std::runtime_error("Failed to convert IP6 to string");
-        }
+        return toString(v);
     }
-    else
-    {
-        throw std::runtime_error("Invalid addr type");
-    }
-    ip.resize(strlen(ip.c_str()));
-    return ip;
+
+    throw std::runtime_error("Invalid addr type");
 }
 
 bool isLinkLocalIP(const std::string& address)
