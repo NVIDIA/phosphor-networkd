@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -17,6 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/log.hpp>
+#include <sstream>
 #include <stdexcept>
 #include <stdplus/raw.hpp>
 #include <string>
@@ -28,14 +30,113 @@ namespace phosphor
 namespace network
 {
 
-namespace
-{
-
 using namespace phosphor::logging;
 using namespace sdbusplus::xyz::openbmc_project::Common::Error;
 namespace fs = std::filesystem;
 
-} // anonymous namespace
+namespace internal
+{
+
+void executeCommandinChildProcess(const char* path, char** args)
+{
+    using namespace std::string_literals;
+    pid_t pid = fork();
+    int status{};
+
+    if (pid == 0)
+    {
+        execv(path, args);
+        auto error = errno;
+        // create the command from var args.
+        std::string command = path + " "s;
+
+        for (int i = 0; args[i]; i++)
+        {
+            command += args[i] + " "s;
+        }
+
+        log<level::ERR>("Couldn't exceute the command",
+                        entry("ERRNO=%d", error),
+                        entry("CMD=%s", command.c_str()));
+        elog<InternalFailure>();
+    }
+    else if (pid < 0)
+    {
+        auto error = errno;
+        log<level::ERR>("Error occurred during fork", entry("ERRNO=%d", error));
+        elog<InternalFailure>();
+    }
+    else if (pid > 0)
+    {
+        while (waitpid(pid, &status, 0) == -1)
+        {
+            if (errno != EINTR)
+            { // Error other than EINTR
+                status = -1;
+                break;
+            }
+        }
+
+        if (status < 0)
+        {
+            std::string command = path + " "s;
+            for (int i = 0; args[i]; i++)
+            {
+                command += args[i] + " "s;
+            }
+
+            log<level::ERR>("Unable to execute the command",
+                            entry("CMD=%s", command.c_str()),
+                            entry("STATUS=%d", status));
+            elog<InternalFailure>();
+        }
+    }
+}
+
+/** @brief Get ignored interfaces from environment */
+std::string getIgnoredInterfacesEnv()
+{
+    auto r = std::getenv("IGNORED_INTERFACES");
+    if (r == nullptr)
+    {
+        return {};
+    }
+    return r;
+}
+
+/** @brief Parse the comma separated interface names */
+std::set<std::string> parseInterfaces(const std::string& interfaces)
+{
+    std::set<std::string> result;
+    std::stringstream ss(interfaces);
+    while (ss.good())
+    {
+        std::string str;
+        std::getline(ss, str, ',');
+        // Trim str
+        if (!str.empty())
+        {
+            str.erase(
+                std::remove_if(str.begin(), str.end(),
+                               [](unsigned char c) { return std::isspace(c); }),
+                str.end());
+        }
+        if (!str.empty())
+        {
+            result.insert(str);
+        }
+    }
+    return result;
+}
+
+/** @brief Get the ignored interfaces */
+const std::set<std::string>& getIgnoredInterfaces()
+{
+    static auto ignoredInterfaces = parseInterfaces(getIgnoredInterfacesEnv());
+    return ignoredInterfaces;
+}
+
+} // namespace internal
 
 uint8_t toCidr(int addressFamily, const std::string& subnetMask)
 {
@@ -290,12 +391,14 @@ InterfaceList getInterfaces()
 
     AddrPtr ifaddrPtr(ifaddr);
     ifaddr = nullptr;
+    const auto& ignoredInterfaces = internal::getIgnoredInterfaces();
 
     for (ifaddrs* ifa = ifaddrPtr.get(); ifa != nullptr; ifa = ifa->ifa_next)
     {
         // walk interfaces
         // if loopback ignore
-        if (ifa->ifa_flags & IFF_LOOPBACK)
+        if (ifa->ifa_flags & IFF_LOOPBACK ||
+            ignoredInterfaces.find(ifa->ifa_name) != ignoredInterfaces.end())
         {
             continue;
         }
@@ -409,66 +512,6 @@ EthernetInterfaceIntf::DHCPConf getDHCPValue(const std::string& confDir,
     }
     return dhcp;
 }
-
-namespace internal
-{
-
-void executeCommandinChildProcess(const char* path, char** args)
-{
-    using namespace std::string_literals;
-    pid_t pid = fork();
-    int status{};
-
-    if (pid == 0)
-    {
-        execv(path, args);
-        auto error = errno;
-        // create the command from var args.
-        std::string command = path + " "s;
-
-        for (int i = 0; args[i]; i++)
-        {
-            command += args[i] + " "s;
-        }
-
-        log<level::ERR>("Couldn't exceute the command",
-                        entry("ERRNO=%d", error),
-                        entry("CMD=%s", command.c_str()));
-        elog<InternalFailure>();
-    }
-    else if (pid < 0)
-    {
-        auto error = errno;
-        log<level::ERR>("Error occurred during fork", entry("ERRNO=%d", error));
-        elog<InternalFailure>();
-    }
-    else if (pid > 0)
-    {
-        while (waitpid(pid, &status, 0) == -1)
-        {
-            if (errno != EINTR)
-            { // Error other than EINTR
-                status = -1;
-                break;
-            }
-        }
-
-        if (status < 0)
-        {
-            std::string command = path + " "s;
-            for (int i = 0; args[i]; i++)
-            {
-                command += args[i] + " "s;
-            }
-
-            log<level::ERR>("Unable to execute the command",
-                            entry("CMD=%s", command.c_str()),
-                            entry("STATUS=%d", status));
-            elog<InternalFailure>();
-        }
-    }
-}
-} // namespace internal
 
 namespace mac_address
 {
