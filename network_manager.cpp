@@ -180,7 +180,7 @@ void Manager::createChildObjects()
         bus, objPath.string(), *this);
 }
 
-ObjectPath Manager::vLAN(IntfName interfaceName, uint32_t id)
+ObjectPath Manager::vlan(IntfName interfaceName, uint32_t id)
 {
     return interfaces[interfaceName]->createVLAN(id);
 }
@@ -210,7 +210,7 @@ void Manager::writeToConfigurationFile()
     restartTimers();
 }
 
-#if SYNC_MAC_FROM_INVENTORY
+#ifdef SYNC_MAC_FROM_INVENTORY
 void Manager::setFistBootMACOnInterface(
     const std::pair<std::string, std::string>& inventoryEthPair)
 {
@@ -219,7 +219,7 @@ void Manager::setFistBootMACOnInterface(
         if (interface.first == inventoryEthPair.first)
         {
             auto returnMAC =
-                interface.second->mACAddress(inventoryEthPair.second);
+                interface.second->macAddress(inventoryEthPair.second);
             if (returnMAC == inventoryEthPair.second)
             {
                 log<level::INFO>("Set the MAC on "),
