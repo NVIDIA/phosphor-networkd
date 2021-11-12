@@ -3,7 +3,6 @@
 #include "system_configuration.hpp"
 
 #include "network_manager.hpp"
-#include "routing_table.hpp"
 
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/log.hpp>
@@ -36,11 +35,10 @@ SystemConfiguration::SystemConfiguration(sdbusplus::bus::bus& bus,
     bus(bus), manager(parent)
 {
     auto name = getHostNameFromSystem();
-    route::Table routingTable;
 
     SystemConfigIntf::hostName(name);
-    auto gatewayList = routingTable.getDefaultGateway();
-    auto gateway6List = routingTable.getDefaultGateway6();
+    const auto& gatewayList = manager.getRouteTable().getDefaultGateway();
+    const auto& gateway6List = manager.getRouteTable().getDefaultGateway6();
     // Assign first entry of gateway list
     std::string gateway;
     std::string gateway6;
@@ -96,7 +94,7 @@ std::string SystemConfiguration::getHostNameFromSystem() const
         reply.read(name);
         return std::get<std::string>(name);
     }
-    catch (const sdbusplus::exception::SdBusError& ex)
+    catch (const sdbusplus::exception::exception& ex)
     {
         log<level::ERR>(
             "Failed to get the hostname from systemd-hostnamed service",
@@ -122,7 +120,10 @@ std::string SystemConfiguration::defaultGateway(std::string gateway)
             InvalidArgumentMetadata::ARGUMENT_VALUE(gateway.c_str()));
     }
     gw = SystemConfigIntf::defaultGateway(gateway);
+
     manager.writeToConfigurationFile();
+    manager.reloadConfigs();
+
     return gw;
 }
 
@@ -143,7 +144,10 @@ std::string SystemConfiguration::defaultGateway6(std::string gateway)
             InvalidArgumentMetadata::ARGUMENT_VALUE(gateway.c_str()));
     }
     gw = SystemConfigIntf::defaultGateway6(gateway);
+
     manager.writeToConfigurationFile();
+    manager.reloadConfigs();
+
     return gw;
 }
 

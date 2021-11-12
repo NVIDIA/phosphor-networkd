@@ -26,13 +26,16 @@ constexpr char SYSTEMD_PATH[] = "/org/freedesktop/systemd1";
 constexpr char SYSTEMD_INTERFACE[] = "org.freedesktop.systemd1.Manager";
 constexpr auto FirstBootFile = "/var/lib/network/firstBoot_";
 
+constexpr char NETWORKD_BUSNAME[] = "org.freedesktop.network1";
+constexpr char NETWORKD_PATH[] = "/org/freedesktop/network1";
+constexpr char NETWORKD_INTERFACE[] = "org.freedesktop.network1.Manager";
+
 namespace phosphor
 {
 namespace network
 {
 
 extern std::unique_ptr<Timer> refreshObjectTimer;
-extern std::unique_ptr<Timer> restartTimer;
 using namespace phosphor::logging;
 using namespace sdbusplus::xyz::openbmc_project::Common::Error;
 
@@ -95,17 +98,9 @@ bool Manager::createDefaultNetworkFiles(bool force)
             }
         }
     }
-    catch (std::exception& e)
+    catch (const std::exception& e)
     {
         log<level::ERR>("Unable to create the default network file");
-    }
-
-    if (isCreated)
-    {
-        // if files created restart the network.
-        // don't need to call the create child objects as eventhandler
-        // will create it.
-        restartSystemdUnit(phosphor::network::networkdService);
     }
 
     return isCreated;
@@ -171,6 +166,8 @@ void Manager::createInterfaces()
 
 void Manager::createChildObjects()
 {
+    routeTable.refresh();
+
     // creates the ethernet interface dbus object.
     createInterfaces();
 
@@ -216,7 +213,6 @@ void Manager::writeToConfigurationFile()
     {
         intf.second->writeConfigurationFile();
     }
-    restartTimers();
 }
 
 #ifdef SYNC_MAC_FROM_INVENTORY
@@ -252,44 +248,18 @@ void Manager::setFistBootMACOnInterface(
 
 #endif
 
-void Manager::restartTimers()
-{
-    using namespace std::chrono;
-    if (refreshObjectTimer && restartTimer)
-    {
-        restartTimer->restartOnce(restartTimeout);
-        refreshObjectTimer->restartOnce(refreshTimeout);
-    }
-}
-
-void Manager::restartSystemdUnit(const std::string& unit)
+void Manager::reloadConfigs()
 {
     try
     {
-        auto method = bus.new_method_call(SYSTEMD_BUSNAME, SYSTEMD_PATH,
-                                          SYSTEMD_INTERFACE, "ResetFailedUnit");
-        method.append(unit);
+        auto method = bus.new_method_call(NETWORKD_BUSNAME, NETWORKD_PATH,
+                                          NETWORKD_INTERFACE, "Reload");
         bus.call_noreply(method);
     }
-    catch (const sdbusplus::exception::SdBusError& ex)
+    catch (const sdbusplus::exception::exception& ex)
     {
-        log<level::ERR>("Failed to reset failed unit",
-                        entry("UNIT=%s", unit.c_str()),
+        log<level::ERR>("Failed to reload configuration",
                         entry("ERR=%s", ex.what()));
-        elog<InternalFailure>();
-    }
-
-    try
-    {
-        auto method = bus.new_method_call(SYSTEMD_BUSNAME, SYSTEMD_PATH,
-                                          SYSTEMD_INTERFACE, "RestartUnit");
-        method.append(unit.c_str(), "replace");
-        bus.call_noreply(method);
-    }
-    catch (const sdbusplus::exception::SdBusError& ex)
-    {
-        log<level::ERR>("Failed to restart service", entry("ERR=%s", ex.what()),
-                        entry("UNIT=%s", unit.c_str()));
         elog<InternalFailure>();
     }
 }

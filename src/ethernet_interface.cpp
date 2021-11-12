@@ -5,7 +5,6 @@
 #include "config_parser.hpp"
 #include "neighbor.hpp"
 #include "network_manager.hpp"
-#include "routing_table.hpp"
 #include "vlan_interface.hpp"
 
 #include <arpa/inet.h>
@@ -91,13 +90,12 @@ EthernetInterface::EthernetInterface(sdbusplus::bus::bus& bus,
     EthernetInterfaceIntf::dhcpEnabled(dhcpEnabled);
     EthernetInterfaceIntf::ipv6AcceptRA(getIPv6AcceptRAFromConf());
     EthernetInterfaceIntf::nicEnabled(enabled ? *enabled : queryNicEnabled());
-    route::Table routingTable;
-    auto gatewayList = routingTable.getDefaultGateway();
-    auto gateway6List = routingTable.getDefaultGateway6();
+    const auto& gatewayList = manager.getRouteTable().getDefaultGateway();
+    const auto& gateway6List = manager.getRouteTable().getDefaultGateway6();
     std::string defaultGateway;
     std::string defaultGateway6;
 
-    for (auto& gateway : gatewayList)
+    for (const auto& gateway : gatewayList)
     {
         if (gateway.first == intfName)
         {
@@ -106,7 +104,7 @@ EthernetInterface::EthernetInterface(sdbusplus::bus::bus& bus,
         }
     }
 
-    for (auto& gateway6 : gateway6List)
+    for (const auto& gateway6 : gateway6List)
     {
         if (gateway6.first == intfName)
         {
@@ -126,6 +124,7 @@ EthernetInterface::EthernetInterface(sdbusplus::bus::bus& bus,
     EthernetInterfaceIntf::ntpServers(getNTPServersFromConf());
 
     EthernetInterfaceIntf::linkUp(linkUp());
+    EthernetInterfaceIntf::mtu(mtu());
 
 #ifdef NIC_SUPPORTS_ETHTOOL
     InterfaceInfo ifInfo = EthernetInterface::getInterfaceInfo();
@@ -321,7 +320,9 @@ ObjectPath EthernetInterface::ip(IP::Protocol protType, std::string ipaddress,
                                      bus, objectPath.c_str(), *this, protType,
                                      ipaddress, origin, prefixLength, gateway));
 
-    manager.writeToConfigurationFile();
+    writeConfigurationFile();
+    manager.reloadConfigs();
+
     return objectPath;
 }
 
@@ -349,7 +350,10 @@ ObjectPath EthernetInterface::neighbor(std::string ipAddress,
                             std::make_shared<phosphor::network::Neighbor>(
                                 bus, objectPath.c_str(), *this, ipAddress,
                                 macAddress, Neighbor::State::Permanent));
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
+
     return objectPath;
 }
 
@@ -369,11 +373,13 @@ InterfaceInfo EthernetInterface::getInterfaceInfo() const
     DuplexMode duplex = {};
     LinkUp linkState = {};
     NICEnabled enabled = {};
+    MTU mtuSize = {};
     EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
 
     if (eifSocket.sock < 0)
     {
-        return std::make_tuple(speed, duplex, autoneg, linkState, enabled);
+        return std::make_tuple(speed, duplex, autoneg, linkState, enabled,
+                               mtuSize);
     }
 
     std::strncpy(ifr.ifr_name, interfaceName().c_str(), IFNAMSIZ - 1);
@@ -389,8 +395,9 @@ InterfaceInfo EthernetInterface::getInterfaceInfo() const
 
     enabled = nicEnabled();
     linkState = linkUp();
+    mtuSize = mtu();
 
-    return std::make_tuple(speed, duplex, autoneg, linkState, enabled);
+    return std::make_tuple(speed, duplex, autoneg, linkState, enabled, mtuSize);
 }
 #endif
 
@@ -460,7 +467,9 @@ void EthernetInterface::deleteObject(const std::string& ipaddress)
         return;
     }
     this->addrs.erase(it);
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
 }
 
 void EthernetInterface::deleteStaticNeighborObject(const std::string& ipAddress)
@@ -473,7 +482,9 @@ void EthernetInterface::deleteStaticNeighborObject(const std::string& ipAddress)
         return;
     }
     staticNeighbors.erase(it);
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
 }
 
 void EthernetInterface::deleteVLANFromSystem(const std::string& interface)
@@ -505,7 +516,7 @@ void EthernetInterface::deleteVLANFromSystem(const std::string& interface)
     {
         deleteInterface(interface);
     }
-    catch (InternalFailure& e)
+    catch (const InternalFailure& e)
     {
         commit<InternalFailure>();
     }
@@ -525,7 +536,8 @@ void EthernetInterface::deleteVLANObject(const std::string& interface)
     // delete the interface
     vlanInterfaces.erase(it);
 
-    manager.writeToConfigurationFile();
+    writeConfigurationFile();
+    manager.reloadConfigs();
 }
 
 std::string EthernetInterface::generateObjectPath(
@@ -562,7 +574,10 @@ bool EthernetInterface::ipv6AcceptRA(bool value)
         return value;
     }
     EthernetInterfaceIntf::ipv6AcceptRA(value);
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
+
     return value;
 }
 
@@ -572,9 +587,11 @@ EthernetInterface::DHCPConf EthernetInterface::dhcpEnabled(DHCPConf value)
     {
         return value;
     }
-
     EthernetInterfaceIntf::dhcpEnabled(value);
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
+
     return value;
 }
 
@@ -599,6 +616,62 @@ bool EthernetInterface::linkUp() const
         log<level::ERR>("ioctl failed for SIOCGIFFLAGS:",
                         entry("ERROR=%s", strerror(errno)));
     }
+    return value;
+}
+
+size_t EthernetInterface::mtu() const
+{
+    EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+    size_t value = EthernetInterfaceIntf::mtu();
+
+    if (eifSocket.sock < 0)
+    {
+        return value;
+    }
+
+    ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, interfaceName().c_str(), IF_NAMESIZE - 1);
+    if (ioctl(eifSocket.sock, SIOCGIFMTU, &ifr) == 0)
+    {
+        value = ifr.ifr_mtu;
+    }
+    else
+    {
+        log<level::ERR>("ioctl failed for SIOCGIFMTU:",
+                        entry("ERROR=%s", strerror(errno)));
+    }
+    return value;
+}
+
+size_t EthernetInterface::mtu(size_t value)
+{
+    if (value == EthernetInterfaceIntf::mtu())
+    {
+        return value;
+    }
+    else if (value == 0)
+    {
+        return EthernetInterfaceIntf::mtu();
+    }
+
+    EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (eifSocket.sock < 0)
+    {
+        return EthernetInterfaceIntf::mtu();
+    }
+
+    ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, interfaceName().c_str(), IF_NAMESIZE - 1);
+    ifr.ifr_mtu = value;
+
+    if (ioctl(eifSocket.sock, SIOCSIFMTU, &ifr) != 0)
+    {
+        log<level::ERR>("ioctl failed for SIOCSIFMTU:",
+                        entry("ERROR=%s", strerror(errno)));
+        return EthernetInterfaceIntf::mtu();
+    }
+    EthernetInterfaceIntf::mtu(value);
+
     return value;
 }
 
@@ -687,6 +760,28 @@ bool EthernetInterface::queryNicEnabled() const
     return *ret;
 }
 
+static void setNICAdminState(int fd, const char* intf, bool up)
+{
+    ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, intf, IF_NAMESIZE - 1);
+    if (ioctl(fd, SIOCGIFFLAGS, &ifr) != 0)
+    {
+        log<level::ERR>("ioctl failed for SIOCGIFFLAGS:",
+                        entry("ERROR=%s", strerror(errno)));
+        elog<InternalFailure>();
+    }
+
+    ifr.ifr_flags &= ~IFF_UP;
+    ifr.ifr_flags |= up ? IFF_UP : 0;
+
+    if (ioctl(fd, SIOCSIFFLAGS, &ifr) != 0)
+    {
+        log<level::ERR>("ioctl failed for SIOCSIFFLAGS:",
+                        entry("ERROR=%s", strerror(errno)));
+        elog<InternalFailure>();
+    }
+}
+
 bool EthernetInterface::nicEnabled(bool value)
 {
     if (value == EthernetInterfaceIntf::nicEnabled())
@@ -699,27 +794,13 @@ bool EthernetInterface::nicEnabled(bool value)
     {
         return EthernetInterfaceIntf::nicEnabled();
     }
+    auto ifname = interfaceName();
+    setNICAdminState(eifSocket.sock, ifname.c_str(), value);
 
-    ifreq ifr = {};
-    std::strncpy(ifr.ifr_name, interfaceName().c_str(), IF_NAMESIZE - 1);
-    if (ioctl(eifSocket.sock, SIOCGIFFLAGS, &ifr) != 0)
-    {
-        log<level::ERR>("ioctl failed for SIOCGIFFLAGS:",
-                        entry("ERROR=%s", strerror(errno)));
-        return EthernetInterfaceIntf::nicEnabled();
-    }
-
-    ifr.ifr_flags &= ~IFF_UP;
-    ifr.ifr_flags |= value ? IFF_UP : 0;
-
-    if (ioctl(eifSocket.sock, SIOCSIFFLAGS, &ifr) != 0)
-    {
-        log<level::ERR>("ioctl failed for SIOCSIFFLAGS:",
-                        entry("ERROR=%s", strerror(errno)));
-        return EthernetInterfaceIntf::nicEnabled();
-    }
     EthernetInterfaceIntf::nicEnabled(value);
+
     writeConfigurationFile();
+    manager.reloadConfigs();
 
     return value;
 }
@@ -747,12 +828,11 @@ ServerList EthernetInterface::staticNameServers(ServerList value)
     try
     {
         EthernetInterfaceIntf::staticNameServers(value);
+
         writeConfigurationFile();
-        // resolved reads the DNS server configuration from the
-        // network file.
-        manager.restartSystemdUnit(networkdService);
+        manager.reloadConfigs();
     }
-    catch (InternalFailure& e)
+    catch (const InternalFailure& e)
     {
         log<level::ERR>("Exception processing DNS entries");
     }
@@ -818,7 +898,7 @@ ServerList EthernetInterface::getNameServerFromResolvd()
     {
         reply.read(name);
     }
-    catch (const sdbusplus::exception::SdBusError& e)
+    catch (const sdbusplus::exception::exception& e)
     {
         log<level::ERR>("Failed to get DNS information from Systemd-Resolved");
     }
@@ -903,8 +983,9 @@ ObjectPath EthernetInterface::createVLAN(VlanId id)
     vlanIntf->writeDeviceFile();
 
     this->vlanInterfaces.emplace(vlanInterfaceName, std::move(vlanIntf));
-    // write the new vlan device entry to the configuration(network) file.
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
 
     return path;
 }
@@ -956,9 +1037,8 @@ ServerList EthernetInterface::ntpServers(ServerList servers)
     auto ntpServers = EthernetInterfaceIntf::ntpServers(servers);
 
     writeConfigurationFile();
-    // timesynchd reads the NTP server configuration from the
-    // network file.
-    manager.restartSystemdUnit(networkdService);
+    manager.reloadConfigs();
+
     return ntpServers;
 }
 // Need to merge the below function with the code which writes the
@@ -1131,7 +1211,7 @@ std::string EthernetInterface::macAddress(std::string value)
     {
         newMAC = mac_address::fromString(value);
     }
-    catch (std::invalid_argument&)
+    catch (const std::invalid_argument&)
     {
         log<level::ERR>("MACAddress is not valid.",
                         entry("MAC=%s", value.c_str()));
@@ -1160,12 +1240,11 @@ std::string EthernetInterface::macAddress(std::string value)
         }
         MacAddressIntf::macAddress(validMAC);
 
-        // TODO: would remove the call below and
-        //      just restart systemd-netwokd
-        //      through https://github.com/systemd/systemd/issues/6696
-        execute("/sbin/ip", "ip", "link", "set", "dev", interface.c_str(),
-                "down");
-        manager.writeToConfigurationFile();
+        writeConfigurationFile();
+        // The MAC and LLADDRs will only update if the NIC is already down
+        EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+        setNICAdminState(eifSocket.sock, interface.c_str(), false);
+        manager.reloadConfigs();
     }
 
 #ifdef HAVE_UBOOT_ENV
@@ -1193,7 +1272,9 @@ void EthernetInterface::deleteAll()
 
     // clear all the ip on the interface
     addrs.clear();
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
 }
 
 std::string EthernetInterface::defaultGateway(std::string gateway)
@@ -1212,7 +1293,10 @@ std::string EthernetInterface::defaultGateway(std::string gateway)
                               Argument::ARGUMENT_VALUE(gateway.c_str()));
     }
     gw = EthernetInterfaceIntf::defaultGateway(gateway);
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
+
     return gw;
 }
 
@@ -1232,7 +1316,10 @@ std::string EthernetInterface::defaultGateway6(std::string gateway)
                               Argument::ARGUMENT_VALUE(gateway.c_str()));
     }
     gw = EthernetInterfaceIntf::defaultGateway6(gateway);
-    manager.writeToConfigurationFile();
+
+    writeConfigurationFile();
+    manager.reloadConfigs();
+
     return gw;
 }
 } // namespace network

@@ -1,14 +1,9 @@
 #pragma once
-
-#include <asm/types.h>
 #include <linux/netlink.h>
-#include <sys/socket.h>
 
-#include <iostream>
-#include <list>
 #include <map>
 #include <string>
-#include <vector>
+#include <string_view>
 
 namespace phosphor
 {
@@ -46,54 +41,36 @@ using Map = std::map<std::string, struct Entry>;
 class Table
 {
   public:
-    Table();
-    ~Table() = default;
-    Table(const Table&) = default;
-    Table& operator=(const Table&) = default;
-    Table(Table&&) = default;
-    Table& operator=(Table&&) = default;
-
-    /**
-     * @brief gets the list of routes.
-     *
-     * @returns list of routes.
-     */
-    Map getRoutes();
+    /** @brief Rebuilds the routing table from the kernel */
+    void refresh();
 
     /**
      * @brief gets the default v4 gateway.
      *
      * @returns the default v4 gateway list.
      */
-    std::map<std::string, std::string> getDefaultGateway() const
+    inline const auto& getDefaultGateway() const
     {
         return defaultGateway;
-    };
+    }
 
     /**
      * @brief gets the default v6 gateway.
      *
      * @returns the default v6 gateway list.
      */
-    std::map<std::string, std::string> getDefaultGateway6() const
+    inline const auto& getDefaultGateway6() const
     {
         return defaultGateway6;
     };
 
   private:
     /**
-     * @brief read the routing data from the socket and fill the buffer.
-     *
-     * @param[in] bufPtr - unique pointer to confidentiality algorithm
-     *                     instance
-     */
-    int readNetLinkSock(int sockFd, std::array<char, BUFSIZE>& buff);
-    /**
      * @brief Parse the route and add it to the route list.
      *
      * @param[in] nlHdr - net link message header.
      */
-    void parseRoutes(const struct nlmsghdr* nlHdr);
+    void parseRoutes(const struct nlmsghdr& nlHdr, std::string_view msg);
 
     std::map<std::string, std::string> defaultGateway;  // default gateway list
     std::map<std::string, std::string> defaultGateway6; // default gateway list

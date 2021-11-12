@@ -13,16 +13,6 @@
 #include <xyz/openbmc_project/Network/EthernetInterface/server.hpp>
 #include <xyz/openbmc_project/Network/MACAddress/server.hpp>
 
-#ifndef SDBUSPP_NEW_CAMELCASE
-#define dhcpEnabled dHCPEnabled
-#define ip iP
-#define ipAddress iPAddress
-#define ipv6AcceptRA iPv6AcceptRA
-#define macAddress mACAddress
-#define nicEnabled nICEnabled
-#define ntpServers nTPServers
-#endif
-
 namespace phosphor
 {
 namespace network
@@ -62,10 +52,11 @@ using DuplexMode = uint8_t;
 using Autoneg = uint8_t;
 using LinkUp = bool;
 using NICEnabled = bool;
+using MTU = size_t;
 using VlanId = uint32_t;
 using InterfaceName = std::string;
 using InterfaceInfo =
-    std::tuple<LinkSpeed, DuplexMode, Autoneg, LinkUp, NICEnabled>;
+    std::tuple<LinkSpeed, DuplexMode, Autoneg, LinkUp, NICEnabled, MTU>;
 using AddressMap = std::map<std::string, std::shared_ptr<IPAddress>>;
 using NeighborMap = std::map<std::string, std::shared_ptr<Neighbor>>;
 using VlanInterfaceMap =
@@ -178,6 +169,12 @@ class EthernetInterface : public Ifaces
     /** Retrieve Link State */
     bool linkUp() const override;
 
+    /** Retrieve MTU Size */
+    size_t mtu() const override;
+
+    /** Set size of MTU */
+    size_t mtu(size_t value) override;
+
     /** Set value of NICEnabled */
     bool nicEnabled(bool value) override;
 
@@ -245,6 +242,7 @@ class EthernetInterface : public Ifaces
     using EthernetInterfaceIntf::dhcpEnabled;
     using EthernetInterfaceIntf::interfaceName;
     using EthernetInterfaceIntf::linkUp;
+    using EthernetInterfaceIntf::mtu;
     using EthernetInterfaceIntf::nicEnabled;
     using MacAddressIntf::macAddress;
 

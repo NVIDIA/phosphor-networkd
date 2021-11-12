@@ -2,6 +2,7 @@
 
 #include "dhcp_configuration.hpp"
 #include "ethernet_interface.hpp"
+#include "routing_table.hpp"
 #include "system_configuration.hpp"
 #include "vlan_interface.hpp"
 #include "xyz/openbmc_project/Network/VLAN/Create/server.hpp"
@@ -13,10 +14,6 @@
 #include <string>
 #include <vector>
 #include <xyz/openbmc_project/Common/FactoryReset/server.hpp>
-
-#ifndef SDBUSPP_NEW_CAMELCASE
-#define vlan vLAN
-#endif
 
 namespace phosphor
 {
@@ -113,9 +110,6 @@ class Manager : public details::VLANCreateIface
      */
     bool createDefaultNetworkFiles(bool force);
 
-    /** @brief restart the network timers. */
-    void restartTimers();
-
     /** @brief This function gets the MAC address from the VPD and
      *  sets it on the corresponding ethernet interface during first
      *  Boot, once it sets the MAC from VPD, it creates a file named
@@ -130,11 +124,9 @@ class Manager : public details::VLANCreateIface
     void setFistBootMACOnInterface(
         const std::pair<std::string, std::string>& ethPair);
 
-    /** @brief Restart the systemd unit
-     *  @param[in] unit - systemd unit name which needs to be
-     *                    restarted.
+    /** @brief Tell systemd-network to reload all of the network configurations
      */
-    virtual void restartSystemdUnit(const std::string& unit);
+    virtual void reloadConfigs();
 
     /** @brief Returns the number of interfaces under this manager.
      *
@@ -153,6 +145,15 @@ class Manager : public details::VLANCreateIface
     bool hasInterface(const std::string& intf)
     {
         return (interfaces.find(intf) != interfaces.end());
+    }
+
+    /** @brief Get the routing table owned by the manager
+     *
+     * @return Routing table reference.
+     */
+    inline const auto& getRouteTable() const
+    {
+        return routeTable;
     }
 
   protected:
@@ -177,6 +178,9 @@ class Manager : public details::VLANCreateIface
 
     /** @brief Network Configuration directory. */
     fs::path confDir;
+
+    /** @brief The routing table */
+    route::Table routeTable;
 };
 
 } // namespace network

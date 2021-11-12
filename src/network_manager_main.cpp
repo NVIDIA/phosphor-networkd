@@ -48,7 +48,6 @@ namespace network
 
 std::unique_ptr<phosphor::network::Manager> manager = nullptr;
 std::unique_ptr<Timer> refreshObjectTimer = nullptr;
-std::unique_ptr<Timer> restartTimer = nullptr;
 
 #ifdef SYNC_MAC_FROM_INVENTORY
 std::unique_ptr<sdbusplus::bus::match::match> EthInterfaceMatch = nullptr;
@@ -244,21 +243,11 @@ void refreshObjects()
     }
 }
 
-/** @brief restart the systemd networkd. */
-void restartNetwork()
-{
-    if (manager)
-    {
-        manager->restartSystemdUnit(phosphor::network::networkdService);
-    }
-}
-
 void initializeTimers()
 {
     auto event = sdeventplus::Event::get_default();
     refreshObjectTimer =
         std::make_unique<Timer>(event, std::bind(refreshObjects));
-    restartTimer = std::make_unique<Timer>(event, std::bind(restartNetwork));
 }
 
 } // namespace network
@@ -309,13 +298,9 @@ int main(int /*argc*/, char** /*argv*/)
     // is not there for any interface.
     // Parameter false means don't create the network
     // files forcefully.
-    if (!phosphor::network::manager->createDefaultNetworkFiles(false))
+    if (phosphor::network::manager->createDefaultNetworkFiles(false))
     {
-        // this will add the additional fixes which is needed
-        // in the existing network file.
-        phosphor::network::manager->writeToConfigurationFile();
-        // whenever the configuration file gets written it restart
-        // the network which creates the network objects
+        phosphor::network::manager->reloadConfigs();
     }
 
     // RtnetLink socket
@@ -331,5 +316,9 @@ int main(int /*argc*/, char** /*argv*/)
     in >> configJson;
     phosphor::network::watchEthernetInterface(bus, configJson);
 #endif
+
+    // Trigger the initial object scan
+    phosphor::network::refreshObjects();
+
     sd_event_loop(eventPtr.get());
 }
