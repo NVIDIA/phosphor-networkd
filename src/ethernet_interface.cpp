@@ -795,11 +795,18 @@ bool EthernetInterface::nicEnabled(bool value)
         return EthernetInterfaceIntf::nicEnabled();
     }
     auto ifname = interfaceName();
-    setNICAdminState(eifSocket.sock, ifname.c_str(), value);
-
-    EthernetInterfaceIntf::nicEnabled(value);
 
     writeConfigurationFile();
+    if (!value)
+    {
+        // We only need to bring down the interface, networkd will always bring
+        // up managed interfaces
+        manager.addReloadPreHook(
+            [ifname = std::move(ifname), eifSocket = std::move(eifSocket)]() {
+                setNICAdminState(eifSocket.sock, ifname.c_str(), false);
+            });
+    }
+    EthernetInterfaceIntf::nicEnabled(value);
     manager.reloadConfigs();
 
     return value;
@@ -1241,9 +1248,11 @@ std::string EthernetInterface::macAddress(std::string value)
         MacAddressIntf::macAddress(validMAC);
 
         writeConfigurationFile();
-        // The MAC and LLADDRs will only update if the NIC is already down
-        EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-        setNICAdminState(eifSocket.sock, interface.c_str(), false);
+        manager.addReloadPreHook([interface]() {
+            // The MAC and LLADDRs will only update if the NIC is already down
+            EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+            setNICAdminState(eifSocket.sock, interface.c_str(), false);
+        });
         manager.reloadConfigs();
     }
 

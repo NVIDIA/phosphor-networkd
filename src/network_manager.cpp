@@ -35,7 +35,7 @@ namespace phosphor
 namespace network
 {
 
-extern std::unique_ptr<Timer> refreshObjectTimer;
+extern std::unique_ptr<Timer> reloadTimer;
 using namespace phosphor::logging;
 using namespace sdbusplus::xyz::openbmc_project::Common::Error;
 
@@ -255,6 +255,24 @@ void Manager::setFistBootMACOnInterface(
 
 void Manager::reloadConfigs()
 {
+    reloadTimer->restartOnce(reloadTimeout);
+}
+
+void Manager::doReloadConfigs()
+{
+    for (auto& hook : reloadPreHooks)
+    {
+        try
+        {
+            hook();
+        }
+        catch (const std::exception& ex)
+        {
+            log<level::ERR>("Failed executing reload hook, ignoring",
+                            entry("ERR=%s", ex.what()));
+        }
+    }
+    reloadPreHooks.clear();
     try
     {
         auto method = bus.new_method_call(NETWORKD_BUSNAME, NETWORKD_PATH,
