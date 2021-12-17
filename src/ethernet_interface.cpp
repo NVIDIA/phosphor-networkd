@@ -179,24 +179,14 @@ void EthernetInterface::disableDHCP(IP::Protocol protocol)
     }
 }
 
-bool EthernetInterface::dhcpIsEnabled(IP::Protocol family, bool ignoreProtocol)
+bool EthernetInterface::dhcpIsEnabled(IP::Protocol family)
 {
-    return ((EthernetInterfaceIntf::dhcpEnabled() ==
-             EthernetInterface::DHCPConf::both) ||
-            ((EthernetInterfaceIntf::dhcpEnabled() ==
-              EthernetInterface::DHCPConf::v6) &&
-             ((family == IP::Protocol::IPv6) || ignoreProtocol)) ||
-            ((EthernetInterfaceIntf::dhcpEnabled() ==
-              EthernetInterface::DHCPConf::v4) &&
-             ((family == IP::Protocol::IPv4) || ignoreProtocol)));
-}
-
-bool EthernetInterface::dhcpToBeEnabled(IP::Protocol family,
-                                        const std::string& nextDHCPState)
-{
-    return ((nextDHCPState == "true") ||
-            ((nextDHCPState == "ipv6") && (family == IP::Protocol::IPv6)) ||
-            ((nextDHCPState == "ipv4") && (family == IP::Protocol::IPv4)));
+    const auto cur = EthernetInterfaceIntf::dhcpEnabled();
+    return cur == EthernetInterface::DHCPConf::both ||
+           (family == IP::Protocol::IPv6 &&
+            cur == EthernetInterface::DHCPConf::v6) ||
+           (family == IP::Protocol::IPv4 &&
+            cur == EthernetInterface::DHCPConf::v4);
 }
 
 bool EthernetInterface::originIsManuallyAssigned(IP::AddressOrigin origin)
@@ -1133,6 +1123,11 @@ void EthernetInterface::writeConfigurationFile()
     stream << "DHCP="s +
                   mapDHCPToSystemd[EthernetInterfaceIntf::dhcpEnabled()] + "\n";
 
+    stream << "[IPv6AcceptRA]\n";
+    stream << "DHCPv6Client=";
+    stream << (dhcpIsEnabled(IP::Protocol::IPv6) ? "true" : "false");
+    stream << "\n";
+
     // Static IP addresses
     for (const auto& addr : addrs)
     {
@@ -1273,12 +1268,6 @@ std::string EthernetInterface::macAddress(std::string value)
 
 void EthernetInterface::deleteAll()
 {
-    if (dhcpIsEnabled(IP::Protocol::IPv4, true))
-    {
-        log<level::INFO>("DHCP enabled on the interface"),
-            entry("INTERFACE=%s", interfaceName().c_str());
-    }
-
     // clear all the ip on the interface
     addrs.clear();
 
