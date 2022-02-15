@@ -9,9 +9,9 @@ option('default-ipv6-accept-ra', type: 'boolean',
 option('sync-mac', type: 'boolean',
        description: 'Sync mac address with phosphor-inventory-manager')
 option('hyp-nw-config', type : 'boolean',
-       description : 'ibm-oem: Enable the hypervisor network manager')
+       description : 'ibm-oem: Enable the hypervisor network manager',
+       value : 'false')
 option('persist-mac', type: 'boolean',
        description: 'Permit the MAC address to be written to the systemd.network config')
 option('force-sync-mac', type: 'boolean',
        description: 'Force sync mac address no matter is first boot or not')
-
