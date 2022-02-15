@@ -11,4 +11,5 @@ option('nic-ethtool', type: 'boolean',
 option('sync-mac', type: 'boolean',
        description: 'Sync mac address with phosphor-inventory-manager')
 option('hyp-nw-config', type : 'boolean',
-       description : 'ibm-oem: Enable the hypervisor network manager')
+       description : 'ibm-oem: Enable the hypervisor network manager',
+       value : 'false')
