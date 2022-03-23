@@ -92,6 +92,14 @@ configure_file(
   install: true,
   install_dir: get_option('datadir') / 'dbus-1' / 'system.d')
 
+configure_file(
+  input: 'bmc-network-online.target.in',
+  output: 'bmc-network-online.target',
+  configuration: {'DEFAULT_BUSNAME': default_busname},
+  install: true,
+  install_dir: dependency('systemd').get_variable(
+    pkgconfig: 'systemdsystemunitdir'))
+
 if not get_option('tests').disabled()
   subdir('test')
 endif

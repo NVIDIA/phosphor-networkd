@@ -21,6 +21,7 @@
 #include <sdbusplus/server/manager.hpp>
 #include <sdeventplus/event.hpp>
 #include <xyz/openbmc_project/Common/error.hpp>
+#include "network_monitor.hpp"
 
 using phosphor::logging::elog;
 using phosphor::logging::entry;
@@ -49,6 +50,7 @@ namespace network
 std::unique_ptr<phosphor::network::Manager> manager = nullptr;
 std::unique_ptr<Timer> refreshObjectTimer = nullptr;
 std::unique_ptr<Timer> reloadTimer = nullptr;
+std::unique_ptr<phosphor::network::NetworkMonitor> networkMonitor = nullptr;
 
 #ifdef SYNC_MAC_FROM_INVENTORY
 std::unique_ptr<sdbusplus::bus::match::match> EthInterfaceMatch = nullptr;
@@ -328,6 +330,8 @@ int main(int /*argc*/, char** /*argv*/)
     in >> configJson;
     phosphor::network::watchEthernetInterface(bus, configJson);
 #endif
+
+    phosphor::network::networkMonitor = std::make_unique<phosphor::network::NetworkMonitor>(bus);
 
     // Trigger the initial object scan
     // This is intentionally deferred, to ensure that systemd-networkd is

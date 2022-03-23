@@ -51,6 +51,7 @@ tests = [
   #'rtnetlink',
   'util',
   'vlan_interface',
+  'network_monitor'
 ]
 
 foreach t : tests
