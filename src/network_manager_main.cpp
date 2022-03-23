@@ -12,12 +12,26 @@
 #include <sdbusplus/server/manager.hpp>
 #include <sdeventplus/clock.hpp>
 #include <sdeventplus/event.hpp>
+<<<<<<< HEAD
 #include <sdeventplus/source/signal.hpp>
 #include <sdeventplus/utility/sdbus.hpp>
 #include <sdeventplus/utility/timer.hpp>
 #include <stdplus/pinned.hpp>
 #include <stdplus/print.hpp>
 #include <stdplus/signal.hpp>
+=======
+#include <xyz/openbmc_project/Common/error.hpp>
+#include "network_monitor.hpp"
+
+using phosphor::logging::elog;
+using phosphor::logging::entry;
+using phosphor::logging::level;
+using phosphor::logging::log;
+using sdbusplus::xyz::openbmc_project::Common::Error::InternalFailure;
+using DbusObjectPath = std::string;
+using DbusInterface = std::string;
+using PropertyValue = std::string;
+>>>>>>> d5d56aa... Phosphor-networkd:
 
 #include <chrono>
 
@@ -26,10 +40,17 @@ constexpr char DEFAULT_OBJPATH[] = "/xyz/openbmc_project/network";
 namespace phosphor::network
 {
 
+<<<<<<< HEAD
 class TimerExecutor : public DelayedExecutor
 {
   private:
     using Timer = sdeventplus::utility::Timer<sdeventplus::ClockId::Monotonic>;
+=======
+std::unique_ptr<phosphor::network::Manager> manager = nullptr;
+std::unique_ptr<Timer> refreshObjectTimer = nullptr;
+std::unique_ptr<Timer> reloadTimer = nullptr;
+std::unique_ptr<phosphor::network::NetworkMonitor> networkMonitor = nullptr;
+>>>>>>> d5d56aa... Phosphor-networkd:
 
   public:
     TimerExecutor(sdeventplus::Event& event, std::chrono::milliseconds delay) :
@@ -93,4 +114,27 @@ int main(int /*argc*/, char** /*argv*/)
         fflush(stderr);
         return 1;
     }
+    // RtnetLink socket
+    phosphor::Descriptor smartSock;
+    createNetLinkSocket(smartSock);
+
+    // RTNETLINK event handler
+    phosphor::network::rtnetlink::Server svr(eventPtr, smartSock);
+
+#ifdef SYNC_MAC_FROM_INVENTORY
+    std::ifstream in(configFile);
+    nlohmann::json configJson;
+    in >> configJson;
+    phosphor::network::watchEthernetInterface(bus, configJson);
+#endif
+
+    phosphor::network::networkMonitor = std::make_unique<phosphor::network::NetworkMonitor>(bus);
+
+    // Trigger the initial object scan
+    // This is intentionally deferred, to ensure that systemd-networkd is
+    // fully configured.
+    phosphor::network::refreshObjectTimer->restartOnce(
+        phosphor::network::refreshTimeout);
+
+    sd_event_loop(eventPtr.get());
 }

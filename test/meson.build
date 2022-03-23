@@ -50,6 +50,7 @@ tests = [
   'rtnetlink',
   'types',
   'util',
+  'network_monitor'
 ]
 
 run_with_tmp = find_program('run_with_tmp', native: true)
