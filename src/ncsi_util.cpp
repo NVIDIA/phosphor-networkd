@@ -402,7 +402,6 @@ int sendOemCommand(int ifindex, int package, int channel,
                    std::span<const unsigned char> payload)
 {
     constexpr auto cmd = 0x50;
-
     lg2::debug("Send OEM Command, CHANNEL : {CHANNEL} , PACKAGE : {PACKAGE}, "
                "INTERFACE_INDEX: {INTERFACE_INDEX}",
                "CHANNEL", lg2::hex, channel, "PACKAGE", lg2::hex, package,

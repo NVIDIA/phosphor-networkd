@@ -17,6 +17,7 @@ using phosphor::logging::log;
 NetworkMonitor::NetworkMonitor(sdbusplus::bus::bus& bus) : bus(bus)
 {
     startup = true;
+    lastNtOnlineState = false;
     registerSignalCallback();
     checkNetworkStatus();
     startup = false;
