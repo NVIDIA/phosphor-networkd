@@ -292,8 +292,10 @@ int applyCmd(int ifindex, const Command& cmd, int package = DEFAULT_VALUE,
                           package);
         if (ret < 0)
         {
+            std::ios_base::fmtflags f( std::cerr.flags() );
             std::cerr << "Failed to set the attribute , RC : " << ret
                       << "PACKAGE " << std::hex << package << std::endl;
+            std::cerr.flags( f );            
             return ret;
         }
     }
@@ -304,8 +306,10 @@ int applyCmd(int ifindex, const Command& cmd, int package = DEFAULT_VALUE,
                           channel);
         if (ret < 0)
         {
+            std::ios_base::fmtflags f( std::cerr.flags() );
             std::cerr << "Failed to set the attribute , RC : " << ret
                       << "CHANNEL : " << std::hex << channel << std::endl;
+            std::cerr.flags( f ); 
             return ret;
         }
     }
@@ -313,8 +317,10 @@ int applyCmd(int ifindex, const Command& cmd, int package = DEFAULT_VALUE,
     ret = nla_put_u32(msg.get(), ncsi_nl_attrs::NCSI_ATTR_IFINDEX, ifindex);
     if (ret < 0)
     {
+        std::ios_base::fmtflags f( std::cerr.flags() );
         std::cerr << "Failed to set the attribute , RC : " << ret
                   << "INTERFACE : " << std::hex << ifindex << std::endl;
+        std::cerr.flags( f ); 
         return ret;
     }
 
@@ -378,10 +384,11 @@ int sendOemCommand(int ifindex, int package, int channel,
                    std::span<const unsigned char> payload)
 {
     constexpr auto cmd = 0x50;
-
+    std::ios_base::fmtflags f( std::cout.flags() );
     std::cout << "Send OEM Command, CHANNEL : " << std::hex << channel
               << ", PACKAGE : " << std::hex << package
               << ", IFINDEX: " << std::hex << ifindex << std::endl;
+    std::cout.flags( f );  
     if (!payload.empty())
     {
         std::cout << "Payload :";
@@ -391,8 +398,7 @@ int sendOemCommand(int ifindex, int package, int channel,
                       << (int)i;
         }
         std::cout << std::endl;
-    }
-
+    } 
     return internal::applyCmd(
         ifindex,
         internal::Command(ncsi_nl_commands::NCSI_CMD_SEND_CMD, cmd, payload),
@@ -411,8 +417,10 @@ int setChannel(int ifindex, int package, int channel)
 
 int clearInterface(int ifindex)
 {
+    std::ios_base::fmtflags f( std::cout.flags() );
     std::cout << "ClearInterface , IFINDEX :" << std::hex << ifindex
               << std::endl;
+    std::cout.flags( f );
     return internal::applyCmd(
         ifindex, internal::Command(ncsi_nl_commands::NCSI_CMD_CLEAR_INTERFACE));
 }
