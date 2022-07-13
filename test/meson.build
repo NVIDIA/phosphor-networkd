@@ -27,6 +27,7 @@ test_deps = [
   networkd_dep,
   gtest,
   gmock,
+  dependency('stdplus-gtest'),
 ]
 
 test_lib = static_library(
@@ -54,14 +55,18 @@ tests = [
   'network_monitor'
 ]
 
+run_with_tmp = find_program('run_with_tmp', native: true)
+
 foreach t : tests
   test(
     t,
-    executable(
+    run_with_tmp,
+    args: executable(
       t.underscorify(),
       'test_' + t + '.cpp',
       implicit_include_directories: false,
-      dependencies: test_dep))
+      dependencies: test_dep),
+    env: {'TMPTMPL': 'phosphor-networkd-test.XXXXXXXXXX'})
 endforeach
 
 if (get_option('hyp-nw-config') == true)
