@@ -53,10 +53,10 @@ std::unique_ptr<Timer> reloadTimer = nullptr;
 std::unique_ptr<phosphor::network::NetworkMonitor> networkMonitor = nullptr;
 
 #ifdef SYNC_MAC_FROM_INVENTORY
-std::unique_ptr<sdbusplus::bus::match::match> EthInterfaceMatch = nullptr;
+std::unique_ptr<sdbusplus::bus::match_t> EthInterfaceMatch = nullptr;
 std::vector<std::string> first_boot_status;
 
-bool setInventoryMACOnSystem(sdbusplus::bus::bus& bus,
+bool setInventoryMACOnSystem(sdbusplus::bus_t& bus,
                              const nlohmann::json& configJson,
                              const std::string& intfname)
 {
@@ -106,13 +106,13 @@ bool setInventoryMACOnSystem(sdbusplus::bus::bus& bus,
 }
 
 // register the macthes to be monitored from inventory manager
-void registerSignals(sdbusplus::bus::bus& bus, const nlohmann::json& configJson)
+void registerSignals(sdbusplus::bus_t& bus, const nlohmann::json& configJson)
 {
     log<level::INFO>("Registering the Inventory Signals Matcher");
 
-    static std::unique_ptr<sdbusplus::bus::match::match> MacAddressMatch;
+    static std::unique_ptr<sdbusplus::bus::match_t> MacAddressMatch;
 
-    auto callback = [&](sdbusplus::message::message& m) {
+    auto callback = [&](sdbusplus::message_t& m) {
         std::map<DbusObjectPath,
                  std::map<DbusInterface, std::variant<PropertyValue>>>
             interfacesProperties;
@@ -150,7 +150,7 @@ void registerSignals(sdbusplus::bus::bus& bus, const nlohmann::json& configJson)
         }
     };
 
-    MacAddressMatch = std::make_unique<sdbusplus::bus::match::match>(
+    MacAddressMatch = std::make_unique<sdbusplus::bus::match_t>(
         bus,
         "interface='org.freedesktop.DBus.ObjectManager',type='signal',"
         "member='InterfacesAdded',path='/xyz/openbmc_project/"
@@ -158,10 +158,10 @@ void registerSignals(sdbusplus::bus::bus& bus, const nlohmann::json& configJson)
         callback);
 }
 
-void watchEthernetInterface(sdbusplus::bus::bus& bus,
+void watchEthernetInterface(sdbusplus::bus_t& bus,
                             const nlohmann::json& configJson)
 {
-    auto mycallback = [&](sdbusplus::message::message& m) {
+    auto mycallback = [&](sdbusplus::message_t& m) {
         std::map<DbusObjectPath,
                  std::map<DbusInterface, std::variant<PropertyValue>>>
             interfacesProperties;
@@ -223,7 +223,7 @@ void watchEthernetInterface(sdbusplus::bus::bus& bus,
             log<level::INFO>(
                 "First boot file is not present, check VPD for MAC");
             phosphor::network::EthInterfaceMatch = std::make_unique<
-                sdbusplus::bus::match::match>(
+                sdbusplus::bus::match_t>(
                 bus,
                 "interface='org.freedesktop.DBus.ObjectManager',type='signal',"
                 "member='InterfacesAdded',path='/xyz/openbmc_project/network'",
@@ -302,7 +302,7 @@ int main(int /*argc*/, char** /*argv*/)
     bus.attach_event(eventPtr.get(), SD_EVENT_PRIORITY_NORMAL);
 
     // Add sdbusplus Object Manager for the 'root' path of the network manager.
-    sdbusplus::server::manager::manager objManager(bus, DEFAULT_OBJPATH);
+    sdbusplus::server::manager_t objManager(bus, DEFAULT_OBJPATH);
     bus.request_name(DEFAULT_BUSNAME);
 
     phosphor::network::manager = std::make_unique<phosphor::network::Manager>(
