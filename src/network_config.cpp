@@ -40,7 +40,8 @@ void writeDHCPDefault(const std::string& filename, const std::string& interface)
                 "[DHCP]\nClientIdentifier=mac\n"
                 "UseDNS=true\nUseDomains=true\n"
                 "UseNTP=true\nUseHostname=true\n"
-                "SendHostname=true\n";
+                "SendHostname=true\n"
+                "[IPv6AcceptRA]\nDHCPv6Client=true\n";
 
     filestream.close();
 }
