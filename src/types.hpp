@@ -1,24 +1,15 @@
 #pragma once
 
-#include "ipaddress.hpp"
-
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <systemd/sd-event.h>
 
-#include <array>
 #include <chrono>
-#include <cstddef>
-#include <functional>
-#include <list>
-#include <map>
 #include <memory>
 #include <sdeventplus/clock.hpp>
 #include <sdeventplus/utility/timer.hpp>
-#include <set>
 #include <string>
 #include <variant>
-#include <vector>
 
 namespace phosphor
 {
@@ -30,30 +21,11 @@ using namespace std::chrono_literals;
 // wait for three seconds before reloading systemd-networkd
 constexpr auto reloadTimeout = 3s;
 
-// refresh the objets after five seconds as network
-// configuration takes 3-4 sec after systemd-networkd restart.
-constexpr auto refreshTimeout = reloadTimeout + 7s;
-
-namespace systemd
-{
-namespace config
-{
-
-constexpr auto networkFilePrefix = "00-bmc-";
-constexpr auto networkFileSuffix = ".network";
-constexpr auto deviceFileSuffix = ".netdev";
-
-} // namespace config
-} // namespace systemd
+// refresh the objets after four seconds as network
+// configuration takes 3-4 sec to reconfigure at most.
+constexpr auto refreshTimeout = 4s;
 
 using IntfName = std::string;
-
-struct AddrInfo
-{
-    uint8_t addrType;
-    std::string ipaddress;
-    uint16_t prefix;
-};
 
 using Addr_t = ifaddrs*;
 
@@ -77,15 +49,10 @@ struct EventDeleter
 };
 using EventPtr = std::unique_ptr<sd_event, EventDeleter>;
 
-template <typename T>
-using UniquePtr = std::unique_ptr<T, std::function<void(T*)>>;
-
 // Byte representations for common address types in network byte order
 using InAddrAny = std::variant<struct in_addr, struct in6_addr>;
 
-using AddrList = std::list<AddrInfo>;
-using IntfAddrMap = std::map<IntfName, AddrList>;
-using InterfaceList = std::set<IntfName>;
+using InterfaceList = std::vector<IntfName>;
 
 using Timer = sdeventplus::utility::Timer<sdeventplus::ClockId::Monotonic>;
 

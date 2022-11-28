@@ -1,7 +1,4 @@
 #pragma once
-
-#include "config_parser.hpp"
-
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/server/object.hpp>
 #include <string>
@@ -20,7 +17,7 @@ namespace dhcp
 using ConfigIntf =
     sdbusplus::xyz::openbmc_project::Network::server::DHCPConfiguration;
 
-using Iface = sdbusplus::server::object::object<ConfigIntf>;
+using Iface = sdbusplus::server::object_t<ConfigIntf>;
 
 /** @class Configuration
  *  @brief DHCP configuration.
@@ -42,17 +39,8 @@ class Configuration : public Iface
      *  @param[in] objPath - Path to attach at.
      *  @param[in] parent - Parent object.
      */
-    Configuration(sdbusplus::bus::bus& bus, const std::string& objPath,
-                  Manager& parent) :
-        Iface(bus, objPath.c_str(), Iface::action::defer_emit),
-        bus(bus), manager(parent)
-    {
-        ConfigIntf::dnsEnabled(getDHCPPropFromConf("UseDNS"));
-        ConfigIntf::ntpEnabled(getDHCPPropFromConf("UseNTP"));
-        ConfigIntf::hostNameEnabled(getDHCPPropFromConf("UseHostname"));
-        ConfigIntf::sendHostNameEnabled(getDHCPPropFromConf("SendHostname"));
-        emit_object_added();
-    }
+    Configuration(sdbusplus::bus_t& bus, const std::string& objPath,
+                  Manager& parent);
 
     /** @brief If true then DNS servers received from the DHCP server
      *         will be used and take precedence over any statically
@@ -84,11 +72,6 @@ class Configuration : public Iface
      */
     bool sendHostNameEnabled(bool value) override;
 
-    /** @brief read the DHCP Prop value from the configuration file
-     *  @param[in] prop - DHCP Prop name.
-     */
-    bool getDHCPPropFromConf(const std::string& prop);
-
     /* @brief Network Manager needed the below function to know the
      *        value of the properties (ntpEnabled,dnsEnabled,hostnameEnabled
               sendHostNameEnabled).
@@ -101,7 +84,7 @@ class Configuration : public Iface
 
   private:
     /** @brief sdbusplus DBus bus connection. */
-    sdbusplus::bus::bus& bus;
+    sdbusplus::bus_t& bus;
 
     /** @brief Network Manager object. */
     phosphor::network::Manager& manager;

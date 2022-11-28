@@ -1,13 +1,9 @@
-#include "config.h"
-
 #include "vlan_interface.hpp"
 
+#include "config_parser.hpp"
 #include "ethernet_interface.hpp"
 #include "network_manager.hpp"
 
-#include <algorithm>
-#include <filesystem>
-#include <fstream>
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/log.hpp>
 #include <string>
@@ -21,14 +17,13 @@ namespace network
 using namespace phosphor::logging;
 using namespace sdbusplus::xyz::openbmc_project::Common::Error;
 
-VlanInterface::VlanInterface(sdbusplus::bus::bus& bus,
-                             const std::string& objPath, DHCPConf dhcpEnabled,
-                             bool nicEnabled, uint32_t vlanID,
-                             EthernetInterface& intf, Manager& parent) :
+VlanInterface::VlanInterface(sdbusplus::bus_t& bus, const std::string& objPath,
+                             const config::Parser& config, bool nicEnabled,
+                             uint32_t vlanID, EthernetInterface& intf,
+                             Manager& parent) :
     VlanIface(bus, objPath.c_str()),
     DeleteIface(bus, objPath.c_str()),
-    EthernetInterface(bus, objPath, dhcpEnabled, parent, /*emitSignal=*/false,
-                      nicEnabled),
+    EthernetInterface(bus, objPath, config, parent, true, nicEnabled),
     parentInterface(intf)
 {
     id(vlanID);
@@ -46,29 +41,13 @@ std::string VlanInterface::macAddress(std::string)
 
 void VlanInterface::writeDeviceFile()
 {
-    using namespace std::string_literals;
-    fs::path confPath = manager.getConfDir();
-    std::string fileName = EthernetInterface::interfaceName() + ".netdev"s;
-    confPath /= fileName;
-    std::fstream stream;
-    try
-    {
-        stream.open(confPath.c_str(), std::fstream::out);
-    }
-    catch (const std::ios_base::failure& e)
-    {
-        log<level::ERR>("Unable to open the VLAN device file",
-                        entry("FILE=%s", confPath.c_str()),
-                        entry("ERROR=%s", e.what()));
-        elog<InternalFailure>();
-    }
-
-    stream << "[NetDev]\n";
-    stream << "Name=" << EthernetInterface::interfaceName() << "\n";
-    stream << "Kind=vlan\n";
-    stream << "[VLAN]\n";
-    stream << "Id=" << id() << "\n";
-    stream.close();
+    config::Parser config;
+    auto& netdev = config.map["NetDev"].emplace_back();
+    netdev["Name"].emplace_back(EthernetInterface::interfaceName());
+    netdev["Kind"].emplace_back("vlan");
+    config.map["VLAN"].emplace_back()["Id"].emplace_back(std::to_string(id()));
+    config.writeFile(config::pathForIntfDev(
+        manager.getConfDir(), EthernetInterface::interfaceName()));
 }
 
 void VlanInterface::delete_()

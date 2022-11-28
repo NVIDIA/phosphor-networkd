@@ -3,8 +3,11 @@
 #include "network_manager.hpp"
 #include "rtnetlink_server.hpp"
 #include "types.hpp"
-#include "watch.hpp"
+#ifdef SYNC_MAC_FROM_INVENTORY
+#include "util.hpp"
+#endif
 
+#include <fmt/format.h>
 #include <linux/netlink.h>
 
 #include <filesystem>
@@ -47,16 +50,16 @@ namespace phosphor
 namespace network
 {
 
-std::unique_ptr<phosphor::network::Manager> manager = nullptr;
+std::unique_ptr<Manager> manager = nullptr;
 std::unique_ptr<Timer> refreshObjectTimer = nullptr;
 std::unique_ptr<Timer> reloadTimer = nullptr;
 std::unique_ptr<phosphor::network::NetworkMonitor> networkMonitor = nullptr;
 
 #ifdef SYNC_MAC_FROM_INVENTORY
-std::unique_ptr<sdbusplus::bus::match::match> EthInterfaceMatch = nullptr;
+std::unique_ptr<sdbusplus::bus::match_t> EthInterfaceMatch = nullptr;
 std::vector<std::string> first_boot_status;
 
-bool setInventoryMACOnSystem(sdbusplus::bus::bus& bus,
+bool setInventoryMACOnSystem(sdbusplus::bus_t& bus,
                              const nlohmann::json& configJson,
                              const std::string& intfname)
 {
@@ -87,7 +90,7 @@ bool setInventoryMACOnSystem(sdbusplus::bus::bus& bus,
             if (status)
             {
                 log<level::INFO>("Removing the match for ethernet interfaces");
-                phosphor::network::EthInterfaceMatch = nullptr;
+                EthInterfaceMatch = nullptr;
             }
         }
         else
@@ -106,13 +109,13 @@ bool setInventoryMACOnSystem(sdbusplus::bus::bus& bus,
 }
 
 // register the macthes to be monitored from inventory manager
-void registerSignals(sdbusplus::bus::bus& bus, const nlohmann::json& configJson)
+void registerSignals(sdbusplus::bus_t& bus, const nlohmann::json& configJson)
 {
     log<level::INFO>("Registering the Inventory Signals Matcher");
 
-    static std::unique_ptr<sdbusplus::bus::match::match> MacAddressMatch;
+    static std::unique_ptr<sdbusplus::bus::match_t> MacAddressMatch;
 
-    auto callback = [&](sdbusplus::message::message& m) {
+    auto callback = [&](sdbusplus::message_t& m) {
         std::map<DbusObjectPath,
                  std::map<DbusInterface, std::variant<PropertyValue>>>
             interfacesProperties;
@@ -150,7 +153,7 @@ void registerSignals(sdbusplus::bus::bus& bus, const nlohmann::json& configJson)
         }
     };
 
-    MacAddressMatch = std::make_unique<sdbusplus::bus::match::match>(
+    MacAddressMatch = std::make_unique<sdbusplus::bus::match_t>(
         bus,
         "interface='org.freedesktop.DBus.ObjectManager',type='signal',"
         "member='InterfacesAdded',path='/xyz/openbmc_project/"
@@ -158,10 +161,10 @@ void registerSignals(sdbusplus::bus::bus& bus, const nlohmann::json& configJson)
         callback);
 }
 
-void watchEthernetInterface(sdbusplus::bus::bus& bus,
+void watchEthernetInterface(sdbusplus::bus_t& bus,
                             const nlohmann::json& configJson)
 {
-    auto mycallback = [&](sdbusplus::message::message& m) {
+    auto mycallback = [&](sdbusplus::message_t& m) {
         std::map<DbusObjectPath,
                  std::map<DbusInterface, std::variant<PropertyValue>>>
             interfacesProperties;
@@ -194,12 +197,11 @@ void watchEthernetInterface(sdbusplus::bus::bus& bus,
                         }
                         else
                         {
-                            if (!phosphor::network::setInventoryMACOnSystem(
-                                    bus, configJson, infname))
+                            if (!setInventoryMACOnSystem(bus, configJson,
+                                                         infname))
                             {
-                                phosphor::network::registerSignals(bus,
-                                                                   configJson);
-                                phosphor::network::EthInterfaceMatch = nullptr;
+                                registerSignals(bus, configJson);
+                                EthInterfaceMatch = nullptr;
                             }
                         }
                         break;
@@ -222,8 +224,7 @@ void watchEthernetInterface(sdbusplus::bus::bus& bus,
 
             log<level::INFO>(
                 "First boot file is not present, check VPD for MAC");
-            phosphor::network::EthInterfaceMatch = std::make_unique<
-                sdbusplus::bus::match::match>(
+            EthInterfaceMatch = std::make_unique<sdbusplus::bus::match_t>(
                 bus,
                 "interface='org.freedesktop.DBus.ObjectManager',type='signal',"
                 "member='InterfacesAdded',path='/xyz/openbmc_project/network'",
@@ -264,25 +265,9 @@ void initializeTimers()
     reloadTimer = std::make_unique<Timer>(event, std::bind(reloadNetworkd));
 }
 
-} // namespace network
-} // namespace phosphor
-
-void createNetLinkSocket(phosphor::Descriptor& smartSock)
+int main()
 {
-    // RtnetLink socket
-    auto fd = socket(PF_NETLINK, SOCK_RAW | SOCK_NONBLOCK, NETLINK_ROUTE);
-    if (fd < 0)
-    {
-        log<level::ERR>("Unable to create the net link socket",
-                        entry("ERRNO=%d", errno));
-        elog<InternalFailure>();
-    }
-    smartSock.set(fd);
-}
-
-int main(int /*argc*/, char** /*argv*/)
-{
-    phosphor::network::initializeTimers();
+    initializeTimers();
 
     auto bus = sdbusplus::bus::new_default();
 
@@ -295,40 +280,33 @@ int main(int /*argc*/, char** /*argv*/)
         return r;
     }
 
-    phosphor::network::EventPtr eventPtr{event};
+    EventPtr eventPtr{event};
     event = nullptr;
 
     // Attach the bus to sd_event to service user requests
     bus.attach_event(eventPtr.get(), SD_EVENT_PRIORITY_NORMAL);
 
     // Add sdbusplus Object Manager for the 'root' path of the network manager.
-    sdbusplus::server::manager::manager objManager(bus, DEFAULT_OBJPATH);
+    sdbusplus::server::manager_t objManager(bus, DEFAULT_OBJPATH);
     bus.request_name(DEFAULT_BUSNAME);
 
-    phosphor::network::manager = std::make_unique<phosphor::network::Manager>(
-        bus, DEFAULT_OBJPATH, NETWORK_CONF_DIR);
+    manager = std::make_unique<Manager>(bus, DEFAULT_OBJPATH, NETWORK_CONF_DIR);
 
     // create the default network files if the network file
     // is not there for any interface.
-    // Parameter false means don't create the network
-    // files forcefully.
-    if (phosphor::network::manager->createDefaultNetworkFiles(false))
+    if (manager->createDefaultNetworkFiles())
     {
-        phosphor::network::manager->reloadConfigs();
+        manager->reloadConfigs();
     }
 
-    // RtnetLink socket
-    phosphor::Descriptor smartSock;
-    createNetLinkSocket(smartSock);
-
     // RTNETLINK event handler
-    phosphor::network::rtnetlink::Server svr(eventPtr, smartSock);
+    rtnetlink::Server svr(eventPtr);
 
 #ifdef SYNC_MAC_FROM_INVENTORY
     std::ifstream in(configFile);
     nlohmann::json configJson;
     in >> configJson;
-    phosphor::network::watchEthernetInterface(bus, configJson);
+    watchEthernetInterface(bus, configJson);
 #endif
 
     phosphor::network::networkMonitor = std::make_unique<phosphor::network::NetworkMonitor>(bus);
@@ -336,8 +314,24 @@ int main(int /*argc*/, char** /*argv*/)
     // Trigger the initial object scan
     // This is intentionally deferred, to ensure that systemd-networkd is
     // fully configured.
-    phosphor::network::refreshObjectTimer->restartOnce(
-        phosphor::network::refreshTimeout);
+    refreshObjectTimer->restartOnce(refreshTimeout);
 
-    sd_event_loop(eventPtr.get());
+    return sd_event_loop(eventPtr.get());
+}
+
+} // namespace network
+} // namespace phosphor
+
+int main(int /*argc*/, char** /*argv*/)
+{
+    try
+    {
+        return phosphor::network::main();
+    }
+    catch (const std::exception& e)
+    {
+        auto msg = fmt::format("FAILED: {}", e.what());
+        log<level::ERR>(msg.c_str(), entry("ERROR", e.what()));
+        return 1;
+    }
 }

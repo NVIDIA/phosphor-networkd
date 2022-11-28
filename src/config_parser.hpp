@@ -1,9 +1,11 @@
 #pragma once
 
 #include <filesystem>
-#include <map>
+#include <functional>
+#include <optional>
+#include <ostream>
 #include <string>
-#include <tuple>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -14,82 +16,187 @@ namespace network
 namespace config
 {
 
-using Section = std::string;
-using KeyValueMap = std::multimap<std::string, std::string>;
-using ValueList = std::vector<std::string>;
+/** @brief Compare in (case insensitive) vs expected (sensitive) */
+bool icaseeq(std::string_view in, std::string_view expected) noexcept;
+/** @brief Turns a systemd bool string into a c++ bool */
+std::optional<bool> parseBool(std::string_view in) noexcept;
 
 namespace fs = std::filesystem;
 
-enum class ReturnCode
+fs::path pathForIntfConf(const fs::path& dir, std::string_view intf);
+fs::path pathForIntfDev(const fs::path& dir, std::string_view intf);
+
+template <typename T, typename Check>
+class Checked
 {
-    SUCCESS = 0x0,
-    SECTION_NOT_FOUND = 0x1,
-    KEY_NOT_FOUND = 0x2,
+  public:
+    struct unchecked
+    {
+    };
+
+    template <typename... Args>
+    inline constexpr Checked(Args&&... args) :
+        t(conCheck(std::forward<Args>(args)...))
+    {
+    }
+
+    template <typename... Args>
+    inline constexpr Checked(unchecked, Args&&... args) :
+        t(std::forward<Args>(args)...)
+    {
+    }
+
+    inline const T& get() const noexcept
+    {
+        return t;
+    }
+
+    inline constexpr operator const T&() const noexcept
+    {
+        return t;
+    }
+
+    inline constexpr bool operator==(const auto& rhs) const
+    {
+        return t == rhs;
+    }
+
+  private:
+    T t;
+
+    template <typename... Args>
+    inline static constexpr T conCheck(Args&&... args)
+    {
+        T t(std::forward<Args>(args)...);
+        Check{}(t);
+        return t;
+    }
+};
+
+template <typename T, typename Check>
+inline constexpr bool operator==(const auto& lhs, const Checked<T, Check>& rhs)
+{
+    return lhs == rhs.get();
+}
+
+template <typename T, typename Check>
+inline constexpr std::ostream& operator<<(std::ostream& s,
+                                          const Checked<T, Check>& rhs)
+{
+    return s << rhs.get();
+}
+
+struct KeyCheck
+{
+    void operator()(const std::string& s);
+};
+struct SectionCheck
+{
+    void operator()(const std::string& s);
+};
+struct ValueCheck
+{
+    void operator()(const std::string& s);
+};
+
+struct string_hash : public std::hash<std::string_view>
+{
+    using is_transparent = void;
+
+    template <typename T>
+    inline size_t operator()(const Checked<std::string, T>& t) const
+    {
+        return static_cast<const std::hash<std::string_view>&>(*this)(t.get());
+    }
+    template <typename T>
+    inline size_t operator()(const T& t) const
+    {
+        return static_cast<const std::hash<std::string_view>&>(*this)(t);
+    }
+};
+
+using Key = Checked<std::string, KeyCheck>;
+using Section = Checked<std::string, SectionCheck>;
+using Value = Checked<std::string, ValueCheck>;
+using ValueList = std::vector<Value>;
+using KeyValuesMap =
+    std::unordered_map<Key, ValueList, string_hash, std::equal_to<>>;
+using KeyValuesMapList = std::vector<KeyValuesMap>;
+using SectionMapInt =
+    std::unordered_map<Section, KeyValuesMapList, string_hash, std::equal_to<>>;
+
+class SectionMap : public SectionMapInt
+{
+  public:
+    const std::string* getLastValueString(std::string_view section,
+                                          std::string_view key) const noexcept;
+    inline auto getValues(std::string_view section, std::string_view key,
+                          auto&& conv) const
+    {
+        std::vector<std::invoke_result_t<decltype(conv), const Value&>> values;
+        auto sit = find(section);
+        if (sit == end())
+        {
+            return values;
+        }
+        for (const auto& secv : sit->second)
+        {
+            auto kit = secv.find(key);
+            if (kit == secv.end())
+            {
+                continue;
+            }
+            for (auto v : kit->second)
+            {
+                values.push_back(conv(v));
+            }
+        }
+        return values;
+    }
+    std::vector<std::string> getValueStrings(std::string_view section,
+                                             std::string_view key) const;
 };
 
 class Parser
 {
   public:
+    SectionMap map;
+
     Parser() = default;
 
     /** @brief Constructor
-     *  @param[in] fileName - Absolute path of the file which will be parsed.
+     *  @param[in] filename - Absolute path of the file which will be parsed.
      */
+    Parser(const fs::path& filename);
 
-    Parser(const fs::path& fileName);
-
-    /** @brief Get the values of the given key and section.
-     *  @param[in] section - section name.
-     *  @param[in] key - key to look for.
-     *  @returns the tuple of return code and the
-     *           values associated with the key.
+    /** @brief Determine if there were warnings parsing the file
+     *  @return The number of parsing issues in the file
      */
+    inline const std::vector<std::string>& getWarnings() const noexcept
+    {
+        return warnings;
+    }
 
-    std::tuple<ReturnCode, ValueList> getValues(const std::string& section,
-                                                const std::string& key);
-
-    /** @brief Set the value of the given key and section.
-     *  @param[in] section - section name.
-     *  @param[in] key - key name.
-     *  @param[in] value - value.
+    /** @brief Get the filename last parsed successfully
+     *  @return file path
      */
-
-    void setValue(const std::string& section, const std::string& key,
-                  const std::string& value);
+    inline const fs::path& getFilename() const noexcept
+    {
+        return filename;
+    }
 
     /** @brief Set the file name and parse it.
-     *  @param[in] fileName - Absolute path of the file.
+     *  @param[in] filename - Absolute path of the file.
      */
+    void setFile(const fs::path& filename);
 
-    void setFile(const fs::path& fileName);
+    /** @brief Write the current config to a file */
+    void writeFile() const;
+    void writeFile(const fs::path& filename);
 
   private:
-    /** @brief Parses the given file and fills the data.
-     *  @param[in] stream - inputstream.
-     */
-
-    void parse(std::istream& stream);
-
-    /** @brief Get all the key values of the given section.
-     *  @param[in] section - section name.
-     *  @returns the tuple of return code and the map of (key,value).
-     */
-
-    std::tuple<ReturnCode, KeyValueMap> getSection(const std::string& section);
-
-    /** @brief checks that whether the value exist in the
-     *         given section.
-     *  @param[in] section - section name.
-     *  @param[in] key - key name.
-     *  @param[in] value - value.
-     *  @returns true if exist otherwise false.
-     */
-
-    bool isValueExist(const std::string& section, const std::string& key,
-                      const std::string& value);
-
-    std::unordered_map<Section, KeyValueMap> sections;
-    fs::path filePath;
+    fs::path filename;
+    std::vector<std::string> warnings;
 };
 
 } // namespace config

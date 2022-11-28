@@ -25,6 +25,8 @@ using namespace sdbusplus::xyz::openbmc_project::Common::Error;
 
 void Table::refresh()
 {
+    defaultGateway.clear();
+    defaultGateway6.clear();
     try
     {
         rtmsg msg{};
@@ -96,16 +98,6 @@ void Table::parseRoutes(const nlmsghdr& hdr, std::string_view msg)
         {
             defaultGateway6[ifNameStr] = gatewayStr;
         }
-    }
-    Entry route(dstStr, gatewayStr, ifName);
-    // if there is already existing route for this network
-    // then ignore the next one as it would not be used by the
-    // routing policy
-    // So don't update the route entry for the network for which
-    // there is already a route exist.
-    if (routeList.find(dstStr) == routeList.end())
-    {
-        routeList.emplace(std::make_pair(dstStr, std::move(route)));
     }
 }
 

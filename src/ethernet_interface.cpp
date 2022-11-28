@@ -3,29 +3,29 @@
 #include "ethernet_interface.hpp"
 
 #include "config_parser.hpp"
+#include "ipaddress.hpp"
 #include "neighbor.hpp"
 #include "network_manager.hpp"
+#include "util.hpp"
 #include "vlan_interface.hpp"
 
 #include <arpa/inet.h>
+#include <fmt/compile.h>
 #include <fmt/format.h>
 #include <linux/ethtool.h>
 #include <linux/rtnetlink.h>
 #include <linux/sockios.h>
 #include <net/if.h>
-#include <netinet/in.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/log.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sstream>
+#include <stdplus/fd/create.hpp>
 #include <stdplus/raw.hpp>
+#include <stdplus/zstring.hpp>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -48,47 +48,31 @@ constexpr auto PROPERTY_INTERFACE = "org.freedesktop.DBus.Properties";
 constexpr auto RESOLVED_SERVICE_PATH = "/org/freedesktop/resolve1/link/";
 constexpr auto METHOD_GET = "Get";
 
-struct EthernetIntfSocket
+static stdplus::Fd& getIFSock()
 {
-    EthernetIntfSocket(int domain, int type, int protocol)
-    {
-        if ((sock = socket(domain, type, protocol)) < 0)
-        {
-            log<level::ERR>("socket creation failed:",
-                            entry("ERROR=%s", strerror(errno)));
-        }
-    }
+    using namespace stdplus::fd;
+    static auto fd =
+        socket(SocketDomain::INet, SocketType::Datagram, SocketProto::IP);
+    return fd;
+}
 
-    ~EthernetIntfSocket()
-    {
-        if (sock >= 0)
-        {
-            close(sock);
-        }
-    }
-
-    int sock{-1};
-};
-
-std::map<EthernetInterface::DHCPConf, std::string> mapDHCPToSystemd = {
-    {EthernetInterface::DHCPConf::both, "true"},
-    {EthernetInterface::DHCPConf::v4, "ipv4"},
-    {EthernetInterface::DHCPConf::v6, "ipv6"},
-    {EthernetInterface::DHCPConf::none, "false"}};
-
-EthernetInterface::EthernetInterface(sdbusplus::bus::bus& bus,
+EthernetInterface::EthernetInterface(sdbusplus::bus_t& bus,
                                      const std::string& objPath,
-                                     DHCPConf dhcpEnabled, Manager& parent,
-                                     bool emitSignal,
+                                     const config::Parser& config,
+                                     Manager& parent, bool emitSignal,
                                      std::optional<bool> enabled) :
-    Ifaces(bus, objPath.c_str(), Ifaces::action::defer_emit),
+    Ifaces(bus, objPath.c_str(),
+           emitSignal ? Ifaces::action::defer_emit
+                      : Ifaces::action::emit_no_signals),
     bus(bus), manager(parent), objPath(objPath)
 {
     auto intfName = objPath.substr(objPath.rfind("/") + 1);
     std::replace(intfName.begin(), intfName.end(), '_', '.');
     interfaceName(intfName);
-    EthernetInterfaceIntf::dhcpEnabled(dhcpEnabled);
-    EthernetInterfaceIntf::ipv6AcceptRA(getIPv6AcceptRAFromConf());
+    auto dhcpVal = getDHCPValue(config);
+    EthernetInterfaceIntf::dhcp4(dhcpVal.v4);
+    EthernetInterfaceIntf::dhcp6(dhcpVal.v6);
+    EthernetInterfaceIntf::ipv6AcceptRA(getIPv6AcceptRA(config));
     EthernetInterfaceIntf::nicEnabled(enabled ? *enabled : queryNicEnabled());
     const auto& gatewayList = manager.getRouteTable().getDefaultGateway();
     const auto& gateway6List = manager.getRouteTable().getDefaultGateway6();
@@ -121,7 +105,8 @@ EthernetInterface::EthernetInterface(sdbusplus::bus::bus& bus,
     {
         MacAddressIntf::macAddress(getMACAddress(intfName));
     }
-    EthernetInterfaceIntf::ntpServers(getNTPServersFromConf());
+    EthernetInterfaceIntf::ntpServers(
+        config.map.getValueStrings("Network", "NTP"));
 
     EthernetInterfaceIntf::linkUp(linkUp());
     EthernetInterfaceIntf::mtu(mtu());
@@ -140,53 +125,30 @@ EthernetInterface::EthernetInterface(sdbusplus::bus::bus& bus,
     }
 }
 
-static IP::Protocol convertFamily(int family)
+static IP::Protocol getProtocol(const InAddrAny& addr)
 {
-    switch (family)
+    if (std::holds_alternative<in_addr>(addr))
     {
-        case AF_INET:
-            return IP::Protocol::IPv4;
-        case AF_INET6:
-            return IP::Protocol::IPv6;
+        return IP::Protocol::IPv4;
+    }
+    else if (std::holds_alternative<in6_addr>(addr))
+    {
+        return IP::Protocol::IPv6;
     }
 
-    throw std::invalid_argument("Bad address family");
-}
-
-void EthernetInterface::disableDHCP(IP::Protocol protocol)
-{
-    DHCPConf dhcpState = EthernetInterfaceIntf::dhcpEnabled();
-    if (dhcpState == EthernetInterface::DHCPConf::both)
-    {
-        if (protocol == IP::Protocol::IPv4)
-        {
-            dhcpEnabled(EthernetInterface::DHCPConf::v6);
-        }
-        else if (protocol == IP::Protocol::IPv6)
-        {
-            dhcpEnabled(EthernetInterface::DHCPConf::v4);
-        }
-    }
-    else if ((dhcpState == EthernetInterface::DHCPConf::v4) &&
-             (protocol == IP::Protocol::IPv4))
-    {
-        dhcpEnabled(EthernetInterface::DHCPConf::none);
-    }
-    else if ((dhcpState == EthernetInterface::DHCPConf::v6) &&
-             (protocol == IP::Protocol::IPv6))
-    {
-        dhcpEnabled(EthernetInterface::DHCPConf::none);
-    }
+    throw std::runtime_error("Invalid addr type");
 }
 
 bool EthernetInterface::dhcpIsEnabled(IP::Protocol family)
 {
-    const auto cur = EthernetInterfaceIntf::dhcpEnabled();
-    return cur == EthernetInterface::DHCPConf::both ||
-           (family == IP::Protocol::IPv6 &&
-            cur == EthernetInterface::DHCPConf::v6) ||
-           (family == IP::Protocol::IPv4 &&
-            cur == EthernetInterface::DHCPConf::v4);
+    switch (family)
+    {
+        case IP::Protocol::IPv6:
+            return dhcp6();
+        case IP::Protocol::IPv4:
+            return dhcp4();
+    }
+    throw std::logic_error("Unreachable");
 }
 
 bool EthernetInterface::originIsManuallyAssigned(IP::AddressOrigin origin)
@@ -206,17 +168,23 @@ void EthernetInterface::createIPAddressObjects()
 {
     addrs.clear();
 
-    auto addrs = getInterfaceAddrs()[interfaceName()];
-
-    for (auto& addr : addrs)
+    AddressFilter filter;
+    filter.interface = ifIndex();
+    auto currentAddrs = getCurrentAddresses(filter);
+    for (const auto& addr : currentAddrs)
     {
-        IP::Protocol addressType = convertFamily(addr.addrType);
+        if (addr.flags & IFA_F_DEPRECATED)
+        {
+            continue;
+        }
+        auto address = toString(addr.address);
+        IP::Protocol addressType = getProtocol(addr.address);
         IP::AddressOrigin origin = IP::AddressOrigin::Static;
         if (dhcpIsEnabled(addressType))
         {
             origin = IP::AddressOrigin::DHCP;
         }
-        if (isLinkLocalIP(addr.ipaddress))
+        if (addr.scope == RT_SCOPE_LINK)
         {
             origin = IP::AddressOrigin::LinkLocal;
         }
@@ -224,13 +192,12 @@ void EthernetInterface::createIPAddressObjects()
         std::string gateway = "";
 
         std::string ipAddressObjectPath = generateObjectPath(
-            addressType, addr.ipaddress, addr.prefix, gateway, origin);
+            addressType, address, addr.prefix, gateway, origin);
 
         this->addrs.insert_or_assign(
-            addr.ipaddress,
-            std::make_shared<phosphor::network::IPAddress>(
-                bus, ipAddressObjectPath.c_str(), *this, addressType,
-                addr.ipaddress, origin, addr.prefix, gateway));
+            address, std::make_shared<phosphor::network::IPAddress>(
+                         bus, ipAddressObjectPath.c_str(), *this, addressType,
+                         address, origin, addr.prefix, gateway));
     }
 }
 
@@ -274,9 +241,20 @@ ObjectPath EthernetInterface::ip(IP::Protocol protType, std::string ipaddress,
 {
     if (dhcpIsEnabled(protType))
     {
-        log<level::INFO>("DHCP enabled on the interface"),
+        log<level::INFO>("DHCP enabled on the interface, disabling"),
             entry("INTERFACE=%s", interfaceName().c_str());
-        disableDHCP(protType);
+        switch (protType)
+        {
+            case IP::Protocol::IPv4:
+                dhcp4(false);
+                break;
+            case IP::Protocol::IPv6:
+                dhcp6(false);
+                break;
+        }
+        // Delete the IP address object and that reloads the networkd
+        // to allow the same IP address to be set as Static IP
+        deleteObject(ipaddress);
     }
 
     IP::AddressOrigin origin = IP::AddressOrigin::Static;
@@ -364,23 +342,20 @@ InterfaceInfo EthernetInterface::getInterfaceInfo() const
     LinkUp linkState = {};
     NICEnabled enabled = {};
     MTU mtuSize = {};
-    EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-
-    if (eifSocket.sock < 0)
-    {
-        return std::make_tuple(speed, duplex, autoneg, linkState, enabled,
-                               mtuSize);
-    }
 
     std::strncpy(ifr.ifr_name, interfaceName().c_str(), IFNAMSIZ - 1);
     ifr.ifr_data = reinterpret_cast<char*>(&edata);
 
     edata.cmd = ETHTOOL_GSET;
-    if (ioctl(eifSocket.sock, SIOCETHTOOL, &ifr) >= 0)
+    try
     {
+        getIFSock().ioctl(SIOCETHTOOL, &ifr);
         speed = edata.speed;
         duplex = edata.duplex;
         autoneg = edata.autoneg;
+    }
+    catch (const std::exception& e)
+    {
     }
 
     enabled = nicEnabled();
@@ -399,19 +374,17 @@ std::string
     EthernetInterface::getMACAddress(const std::string& interfaceName) const
 {
     std::string activeMACAddr = MacAddressIntf::macAddress();
-    EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-
-    if (eifSocket.sock < 0)
-    {
-        return activeMACAddr;
-    }
 
     ifreq ifr = {};
     std::strncpy(ifr.ifr_name, interfaceName.c_str(), IFNAMSIZ - 1);
-    if (ioctl(eifSocket.sock, SIOCGIFHWADDR, &ifr) != 0)
+    try
+    {
+        getIFSock().ioctl(SIOCGIFHWADDR, &ifr);
+    }
+    catch (const std::exception& e)
     {
         log<level::ERR>("ioctl failed for SIOCGIFHWADDR:",
-                        entry("ERROR=%s", strerror(errno)));
+                        entry("ERROR=%s", e.what()));
         elog<InternalFailure>();
     }
 
@@ -479,25 +452,14 @@ void EthernetInterface::deleteStaticNeighborObject(const std::string& ipAddress)
 
 void EthernetInterface::deleteVLANFromSystem(const std::string& interface)
 {
-    auto confDir = manager.getConfDir();
-    fs::path networkFile = confDir;
-    networkFile /= systemd::config::networkFilePrefix + interface +
-                   systemd::config::networkFileSuffix;
-
-    fs::path deviceFile = confDir;
-    deviceFile /= interface + systemd::config::deviceFileSuffix;
+    const auto& confDir = manager.getConfDir();
+    auto networkFile = config::pathForIntfConf(confDir, interface);
+    auto deviceFile = config::pathForIntfDev(confDir, interface);
 
     // delete the vlan network file
-    if (fs::is_regular_file(networkFile))
-    {
-        fs::remove(networkFile);
-    }
-
-    // delete the vlan device file
-    if (fs::is_regular_file(deviceFile))
-    {
-        fs::remove(deviceFile);
-    }
+    std::error_code ec;
+    std::filesystem::remove(networkFile, ec);
+    std::filesystem::remove(deviceFile, ec);
 
     // TODO  systemd doesn't delete the virtual network interface
     // even after deleting all the related configuartion.
@@ -559,76 +521,103 @@ std::string EthernetInterface::generateStaticNeighborObjectPath(
 
 bool EthernetInterface::ipv6AcceptRA(bool value)
 {
-    if (value == EthernetInterfaceIntf::ipv6AcceptRA())
+    if (ipv6AcceptRA() != EthernetInterfaceIntf::ipv6AcceptRA(value))
     {
-        return value;
+        writeConfigurationFile();
+        manager.reloadConfigs();
     }
-    EthernetInterfaceIntf::ipv6AcceptRA(value);
+    return value;
+}
 
-    writeConfigurationFile();
-    manager.reloadConfigs();
+bool EthernetInterface::dhcp4(bool value)
+{
+    if (dhcp4() != EthernetInterfaceIntf::dhcp4(value))
+    {
+        writeConfigurationFile();
+        manager.reloadConfigs();
+    }
+    return value;
+}
 
+bool EthernetInterface::dhcp6(bool value)
+{
+    if (dhcp6() != EthernetInterfaceIntf::dhcp6(value))
+    {
+        writeConfigurationFile();
+        manager.reloadConfigs();
+    }
     return value;
 }
 
 EthernetInterface::DHCPConf EthernetInterface::dhcpEnabled(DHCPConf value)
 {
-    if (value == EthernetInterfaceIntf::dhcpEnabled())
+    auto old4 = EthernetInterfaceIntf::dhcp4();
+    auto new4 = EthernetInterfaceIntf::dhcp4(value == DHCPConf::v4 ||
+                                             value == DHCPConf::v4v6stateless ||
+                                             value == DHCPConf::both);
+    auto old6 = EthernetInterfaceIntf::dhcp6();
+    auto new6 = EthernetInterfaceIntf::dhcp6(value == DHCPConf::v6 ||
+                                             value == DHCPConf::both);
+    auto oldra = EthernetInterfaceIntf::ipv6AcceptRA();
+    auto newra = EthernetInterfaceIntf::ipv6AcceptRA(
+        value == DHCPConf::v6stateless || value == DHCPConf::v4v6stateless ||
+        value == DHCPConf::v6 || value == DHCPConf::both);
+
+    if (old4 != new4 || old6 != new6 || oldra != newra)
     {
-        return value;
+        writeConfigurationFile();
+        manager.reloadConfigs();
     }
-    EthernetInterfaceIntf::dhcpEnabled(value);
-
-    writeConfigurationFile();
-    manager.reloadConfigs();
-
     return value;
+}
+
+EthernetInterface::DHCPConf EthernetInterface::dhcpEnabled() const
+{
+    if (dhcp6())
+    {
+        return dhcp4() ? DHCPConf::both : DHCPConf::v6;
+    }
+    else if (dhcp4())
+    {
+        return ipv6AcceptRA() ? DHCPConf::v4v6stateless : DHCPConf::v4;
+    }
+    return ipv6AcceptRA() ? DHCPConf::v6stateless : DHCPConf::none;
 }
 
 bool EthernetInterface::linkUp() const
 {
-    EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
     bool value = EthernetInterfaceIntf::linkUp();
-
-    if (eifSocket.sock < 0)
-    {
-        return value;
-    }
 
     ifreq ifr = {};
     std::strncpy(ifr.ifr_name, interfaceName().c_str(), IF_NAMESIZE - 1);
-    if (ioctl(eifSocket.sock, SIOCGIFFLAGS, &ifr) == 0)
+    try
     {
+        getIFSock().ioctl(SIOCGIFFLAGS, &ifr);
         value = static_cast<bool>(ifr.ifr_flags & IFF_RUNNING);
     }
-    else
+    catch (const std::exception& e)
     {
         log<level::ERR>("ioctl failed for SIOCGIFFLAGS:",
-                        entry("ERROR=%s", strerror(errno)));
+                        entry("ERROR=%s", e.what()));
     }
     return value;
 }
 
 size_t EthernetInterface::mtu() const
 {
-    EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
     size_t value = EthernetInterfaceIntf::mtu();
-
-    if (eifSocket.sock < 0)
-    {
-        return value;
-    }
 
     ifreq ifr = {};
     std::strncpy(ifr.ifr_name, interfaceName().c_str(), IF_NAMESIZE - 1);
-    if (ioctl(eifSocket.sock, SIOCGIFMTU, &ifr) == 0)
+    try
     {
+        getIFSock().ioctl(SIOCGIFMTU, &ifr);
         value = ifr.ifr_mtu;
     }
-    else
+    catch (const std::exception& e)
     {
         log<level::ERR>("ioctl failed for SIOCGIFMTU:",
-                        entry("ERROR=%s", strerror(errno)));
+                        entry("ERROR=%s", e.what()));
     }
     return value;
 }
@@ -644,24 +633,22 @@ size_t EthernetInterface::mtu(size_t value)
         return EthernetInterfaceIntf::mtu();
     }
 
-    EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (eifSocket.sock < 0)
-    {
-        return EthernetInterfaceIntf::mtu();
-    }
-
     ifreq ifr = {};
     std::strncpy(ifr.ifr_name, interfaceName().c_str(), IF_NAMESIZE - 1);
     ifr.ifr_mtu = value;
 
-    if (ioctl(eifSocket.sock, SIOCSIFMTU, &ifr) != 0)
+    try
+    {
+        getIFSock().ioctl(SIOCSIFMTU, &ifr);
+    }
+    catch (const std::exception& e)
     {
         log<level::ERR>("ioctl failed for SIOCSIFMTU:",
                         entry("ERROR=%s", strerror(errno)));
         return EthernetInterfaceIntf::mtu();
     }
-    EthernetInterfaceIntf::mtu(value);
 
+    EthernetInterfaceIntf::mtu(value);
     return value;
 }
 
@@ -687,13 +674,13 @@ bool EthernetInterface::queryNicEnabled() const
 
     // Build a matcher before making the property call to ensure we
     // can eventually get the value.
-    sdbusplus::bus::match::match match(
+    sdbusplus::bus::match_t match(
         bus,
         fmt::format("type='signal',sender='{}',path='{}',interface='{}',member="
                     "'PropertiesChanged',arg0='{}',",
                     svc, path, PROPERTY_INTERFACE, intf)
             .c_str(),
-        [&](sdbusplus::message::message& m) {
+        [&](sdbusplus::message_t& m) {
             std::string intf;
             std::unordered_map<std::string, std::variant<std::string>> values;
             try
@@ -750,26 +737,15 @@ bool EthernetInterface::queryNicEnabled() const
     return *ret;
 }
 
-static void setNICAdminState(int fd, const char* intf, bool up)
+static void setNICAdminState(stdplus::const_zstring intf, bool up)
 {
     ifreq ifr = {};
-    std::strncpy(ifr.ifr_name, intf, IF_NAMESIZE - 1);
-    if (ioctl(fd, SIOCGIFFLAGS, &ifr) != 0)
-    {
-        log<level::ERR>("ioctl failed for SIOCGIFFLAGS:",
-                        entry("ERROR=%s", strerror(errno)));
-        elog<InternalFailure>();
-    }
+    std::strncpy(ifr.ifr_name, intf.data(), IF_NAMESIZE - 1);
+    getIFSock().ioctl(SIOCGIFFLAGS, &ifr);
 
     ifr.ifr_flags &= ~IFF_UP;
     ifr.ifr_flags |= up ? IFF_UP : 0;
-
-    if (ioctl(fd, SIOCSIFFLAGS, &ifr) != 0)
-    {
-        log<level::ERR>("ioctl failed for SIOCSIFFLAGS:",
-                        entry("ERROR=%s", strerror(errno)));
-        elog<InternalFailure>();
-    }
+    getIFSock().ioctl(SIOCSIFFLAGS, &ifr);
 }
 
 bool EthernetInterface::nicEnabled(bool value)
@@ -779,33 +755,18 @@ bool EthernetInterface::nicEnabled(bool value)
         return value;
     }
 
-    EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (eifSocket.sock < 0)
-    {
-        return EthernetInterfaceIntf::nicEnabled();
-    }
-    auto ifname = interfaceName();
-
+    EthernetInterfaceIntf::nicEnabled(value);
     writeConfigurationFile();
     if (!value)
     {
         // We only need to bring down the interface, networkd will always bring
         // up managed interfaces
         manager.addReloadPreHook(
-            [ifname = std::move(ifname), eifSocket = std::move(eifSocket)]() {
-                setNICAdminState(eifSocket.sock, ifname.c_str(), false);
-            });
+            [ifname = interfaceName()]() { setNICAdminState(ifname, false); });
     }
-    EthernetInterfaceIntf::nicEnabled(value);
     manager.reloadConfigs();
 
     return value;
-}
-
-ServerList EthernetInterface::nameservers(ServerList /*value*/)
-{
-    elog<NotAllowed>(NotAllowedArgument::REASON("ReadOnly Property"));
-    return EthernetInterfaceIntf::nameservers();
 }
 
 ServerList EthernetInterface::staticNameServers(ServerList value)
@@ -836,30 +797,11 @@ ServerList EthernetInterface::staticNameServers(ServerList value)
     return EthernetInterfaceIntf::staticNameServers();
 }
 
-void EthernetInterface::loadNameServers()
+void EthernetInterface::loadNameServers(const config::Parser& config)
 {
     EthernetInterfaceIntf::nameservers(getNameServerFromResolvd());
-    EthernetInterfaceIntf::staticNameServers(getstaticNameServerFromConf());
-}
-
-ServerList EthernetInterface::getstaticNameServerFromConf()
-{
-    fs::path confPath = manager.getConfDir();
-
-    std::string fileName = systemd::config::networkFilePrefix +
-                           interfaceName() + systemd::config::networkFileSuffix;
-    confPath /= fileName;
-    ServerList servers;
-    config::Parser parser(confPath.string());
-    auto rc = config::ReturnCode::SUCCESS;
-
-    std::tie(rc, servers) = parser.getValues("Network", "DNS");
-    if (rc != config::ReturnCode::SUCCESS)
-    {
-        log<level::DEBUG>("Unable to get the value for network[DNS]",
-                          entry("RC=%d", rc));
-    }
-    return servers;
+    EthernetInterfaceIntf::staticNameServers(
+        config.map.getValueStrings("Network", "DNS"));
 }
 
 ServerList EthernetInterface::getNameServerFromResolvd()
@@ -895,7 +837,7 @@ ServerList EthernetInterface::getNameServerFromResolvd()
     {
         reply.read(name);
     }
-    catch (const sdbusplus::exception::exception& e)
+    catch (const sdbusplus::exception_t& e)
     {
         log<level::ERR>("Failed to get DNS information from Systemd-Resolved");
     }
@@ -942,23 +884,33 @@ ServerList EthernetInterface::getNameServerFromResolvd()
     return servers;
 }
 
+std::string EthernetInterface::vlanIntfName(VlanId id) const
+{
+    return fmt::format(FMT_COMPILE("{}.{}"), interfaceName(), id);
+}
+
+std::string EthernetInterface::vlanObjPath(VlanId id) const
+{
+    return fmt::format(FMT_COMPILE("{}_{}"), objPath, id);
+}
+
 void EthernetInterface::loadVLAN(VlanId id)
 {
-    std::string vlanInterfaceName = interfaceName() + "." + std::to_string(id);
-    std::string path = objPath;
-    path += "_" + std::to_string(id);
+    auto vlanInterfaceName = vlanIntfName(id);
+    auto path = vlanObjPath(id);
 
-    DHCPConf dhcpEnabled =
-        getDHCPValue(manager.getConfDir().string(), vlanInterfaceName);
+    config::Parser config(
+        config::pathForIntfConf(manager.getConfDir(), vlanInterfaceName));
+
     auto vlanIntf = std::make_unique<phosphor::network::VlanInterface>(
-        bus, path.c_str(), dhcpEnabled, EthernetInterfaceIntf::nicEnabled(), id,
+        bus, path.c_str(), config, EthernetInterfaceIntf::nicEnabled(), id,
         *this, manager);
 
     // Fetch the ip address from the system
     // and create the dbus object.
     vlanIntf->createIPAddressObjects();
     vlanIntf->createStaticNeighborObjects();
-    vlanIntf->loadNameServers();
+    vlanIntf->loadNameServers(config);
 
     this->vlanInterfaces.emplace(std::move(vlanInterfaceName),
                                  std::move(vlanIntf));
@@ -966,15 +918,22 @@ void EthernetInterface::loadVLAN(VlanId id)
 
 ObjectPath EthernetInterface::createVLAN(VlanId id)
 {
-    std::string vlanInterfaceName = interfaceName() + "." + std::to_string(id);
-    std::string path = objPath;
-    path += "_" + std::to_string(id);
+    auto vlanInterfaceName = vlanIntfName(id);
+    if (this->vlanInterfaces.find(vlanInterfaceName) !=
+        this->vlanInterfaces.end())
+    {
+        log<level::ERR>("VLAN already exists", entry("VLANID=%u", id));
+        elog<InvalidArgument>(
+            Argument::ARGUMENT_NAME("VLANId"),
+            Argument::ARGUMENT_VALUE(std::to_string(id).c_str()));
+    }
+
+    auto path = vlanObjPath(id);
 
     // Pass the parents nicEnabled property, so that the child
     // VLAN interface can inherit.
-
     auto vlanIntf = std::make_unique<phosphor::network::VlanInterface>(
-        bus, path.c_str(), EthernetInterface::DHCPConf::none,
+        bus, path.c_str(), config::Parser(),
         EthernetInterfaceIntf::nicEnabled(), id, *this, manager);
 
     // write the device file for the vlan interface.
@@ -986,48 +945,6 @@ ObjectPath EthernetInterface::createVLAN(VlanId id)
     manager.reloadConfigs();
 
     return path;
-}
-
-bool EthernetInterface::getIPv6AcceptRAFromConf()
-{
-    fs::path confPath = manager.getConfDir();
-
-    std::string fileName = systemd::config::networkFilePrefix +
-                           interfaceName() + systemd::config::networkFileSuffix;
-    confPath /= fileName;
-    config::ValueList values;
-    config::Parser parser(confPath.string());
-    auto rc = config::ReturnCode::SUCCESS;
-    std::tie(rc, values) = parser.getValues("Network", "IPv6AcceptRA");
-    if (rc != config::ReturnCode::SUCCESS)
-    {
-        log<level::DEBUG>("Unable to get the value for Network[IPv6AcceptRA]",
-                          entry("rc=%d", rc));
-        return false;
-    }
-    return (values[0] == "true");
-}
-
-ServerList EthernetInterface::getNTPServersFromConf()
-{
-    fs::path confPath = manager.getConfDir();
-
-    std::string fileName = systemd::config::networkFilePrefix +
-                           interfaceName() + systemd::config::networkFileSuffix;
-    confPath /= fileName;
-
-    ServerList servers;
-    config::Parser parser(confPath.string());
-    auto rc = config::ReturnCode::SUCCESS;
-
-    std::tie(rc, servers) = parser.getValues("Network", "NTP");
-    if (rc != config::ReturnCode::SUCCESS)
-    {
-        log<level::DEBUG>("Unable to get the value for Network[NTP]",
-                          entry("rc=%d", rc));
-    }
-
-    return servers;
 }
 
 ServerList EthernetInterface::ntpServers(ServerList servers)
@@ -1045,170 +962,130 @@ ServerList EthernetInterface::ntpServers(ServerList servers)
 
 void EthernetInterface::writeConfigurationFile()
 {
-    // write all the static ip address in the systemd-network conf file
-
-    using namespace std::string_literals;
-    namespace fs = std::filesystem;
-
-    // if there is vlan interafce then write the configuration file
-    // for vlan also.
-
     for (const auto& intf : vlanInterfaces)
     {
         intf.second->writeConfigurationFile();
     }
 
-    fs::path confPath = manager.getConfDir();
-
-    std::string fileName = systemd::config::networkFilePrefix +
-                           interfaceName() + systemd::config::networkFileSuffix;
-    confPath /= fileName;
-    std::fstream stream;
-
-    stream.open(confPath.c_str(), std::fstream::out);
-    if (!stream.is_open())
+    config::Parser config;
+    config.map["Match"].emplace_back()["Name"].emplace_back(interfaceName());
     {
-        log<level::ERR>("Unable to open the file",
-                        entry("FILE=%s", confPath.c_str()));
-        elog<InternalFailure>();
-    }
-
-    // Write the device
-    stream << "[Match]\n";
-    stream << "Name=" << interfaceName() << "\n";
-
-    auto addrs = getAddresses();
-
-    // Write the link section
-    stream << "[Link]\n";
-    auto mac = MacAddressIntf::macAddress();
-    if (!mac.empty())
-    {
-        stream << "MACAddress=" << mac << "\n";
-    }
-
-    if (!EthernetInterfaceIntf::nicEnabled())
-    {
-        stream << "Unmanaged=yes\n";
-    }
-
-    // write the network section
-    stream << "[Network]\n";
-#ifdef LINK_LOCAL_AUTOCONFIGURATION
-    stream << "LinkLocalAddressing=yes\n";
-#else
-    stream << "LinkLocalAddressing=no\n";
+        auto& link = config.map["Link"].emplace_back();
+#ifdef PERSIST_MAC
+        auto mac = MacAddressIntf::macAddress();
+        if (!mac.empty())
+        {
+            link["MACAddress"].emplace_back(mac);
+        }
 #endif
-    stream << std::boolalpha
-           << "IPv6AcceptRA=" << EthernetInterfaceIntf::ipv6AcceptRA() << "\n";
-
-    // Add the VLAN entry
-    for (const auto& intf : vlanInterfaces)
-    {
-        stream << "VLAN=" << intf.second->EthernetInterface::interfaceName()
-               << "\n";
-    }
-    // Add the NTP server
-    for (const auto& ntp : EthernetInterfaceIntf::ntpServers())
-    {
-        stream << "NTP=" << ntp << "\n";
-    }
-
-    // Add the DNS entry
-    for (const auto& dns : EthernetInterfaceIntf::staticNameServers())
-    {
-        stream << "DNS=" << dns << "\n";
-    }
-
-    // Add the DHCP entry
-    stream << "DHCP="s +
-                  mapDHCPToSystemd[EthernetInterfaceIntf::dhcpEnabled()] + "\n";
-
-    stream << "[IPv6AcceptRA]\n";
-    stream << "DHCPv6Client=";
-    stream << (dhcpIsEnabled(IP::Protocol::IPv6) ? "true" : "false");
-    stream << "\n";
-
-    // Static IP addresses
-    for (const auto& addr : addrs)
-    {
-        if (originIsManuallyAssigned(addr.second->origin()) &&
-            !dhcpIsEnabled(addr.second->type()))
+        if (!EthernetInterfaceIntf::nicEnabled())
         {
-            // Process all static addresses
-            std::string address = addr.second->address() + "/" +
-                                  std::to_string(addr.second->prefixLength());
-
-            // build the address entries. Do not use [Network] shortcuts to
-            // insert address entries.
-            stream << "[Address]\n";
-            stream << "Address=" << address << "\n";
+            link["Unmanaged"].emplace_back("yes");
         }
     }
-
-    if (!dhcpIsEnabled(IP::Protocol::IPv4))
     {
-        auto gateway = EthernetInterfaceIntf::defaultGateway();
-        if (!gateway.empty())
+        auto& network = config.map["Network"].emplace_back();
+        auto& lla = network["LinkLocalAddressing"];
+#ifdef LINK_LOCAL_AUTOCONFIGURATION
+        lla.emplace_back("yes");
+#else
+        lla.emplace_back("no");
+#endif
+        network["IPv6AcceptRA"].emplace_back(ipv6AcceptRA() ? "true" : "false");
+        network["DHCP"].emplace_back(dhcp4() ? (dhcp6() ? "true" : "ipv4")
+                                             : (dhcp6() ? "ipv6" : "false"));
         {
-            stream << "[Route]\n";
-            stream << "Gateway=" << gateway << "\n";
+            auto& vlans = network["VLAN"];
+            for (const auto& intf : vlanInterfaces)
+            {
+                vlans.emplace_back(
+                    intf.second->EthernetInterface::interfaceName());
+            }
+        }
+        {
+            auto& ntps = network["NTP"];
+            for (const auto& ntp : EthernetInterfaceIntf::ntpServers())
+            {
+                ntps.emplace_back(ntp);
+            }
+        }
+        {
+            auto& dnss = network["DNS"];
+            for (const auto& dns : EthernetInterfaceIntf::staticNameServers())
+            {
+                dnss.emplace_back(dns);
+            }
+        }
+        {
+            auto& address = network["Address"];
+            for (const auto& addr : getAddresses())
+            {
+                if (originIsManuallyAssigned(addr.second->origin()) &&
+                    !dhcpIsEnabled(addr.second->type()))
+                {
+                    address.emplace_back(
+                        fmt::format("{}/{}", addr.second->address(),
+                                    addr.second->prefixLength()));
+                }
+            }
+        }
+        {
+            auto& gateways = network["Gateway"];
+            if (!dhcp4())
+            {
+                auto gateway = EthernetInterfaceIntf::defaultGateway();
+                if (!gateway.empty())
+                {
+                    gateways.emplace_back(gateway);
+                }
+            }
+
+            if (!dhcp6())
+            {
+                auto gateway6 = EthernetInterfaceIntf::defaultGateway6();
+                if (!gateway6.empty())
+                {
+                    gateways.emplace_back(gateway6);
+                }
+            }
         }
     }
-
-    if (!dhcpIsEnabled(IP::Protocol::IPv6))
+    config.map["IPv6AcceptRA"].emplace_back()["DHCPv6Client"].emplace_back(
+        dhcp6() ? "true" : "false");
     {
-        auto gateway6 = EthernetInterfaceIntf::defaultGateway6();
-        if (!gateway6.empty())
+        auto& neighbors = config.map["Neighbor"];
+        for (const auto& sneighbor : staticNeighbors)
         {
-            stream << "[Route]\n";
-            stream << "Gateway=" << gateway6 << "\n";
+            auto& neighbor = neighbors.emplace_back();
+            neighbor["Address"].emplace_back(sneighbor.second->ipAddress());
+            neighbor["MACAddress"].emplace_back(sneighbor.second->macAddress());
         }
     }
-
-    // Write the neighbor sections
-    for (const auto& neighbor : staticNeighbors)
     {
-        stream << "[Neighbor]"
-               << "\n";
-        stream << "Address=" << neighbor.second->ipAddress() << "\n";
-        stream << "MACAddress=" << neighbor.second->macAddress() << "\n";
+        auto& dhcp = config.map["DHCP"].emplace_back();
+        dhcp["ClientIdentifier"].emplace_back("mac");
+        if (manager.getDHCPConf())
+        {
+            const auto& conf = *manager.getDHCPConf();
+            auto dns_enabled = conf.dnsEnabled() ? "true" : "false";
+            dhcp["UseDNS"].emplace_back(dns_enabled);
+            dhcp["UseDomains"].emplace_back(dns_enabled);
+            dhcp["UseNTP"].emplace_back(conf.ntpEnabled() ? "true" : "false");
+            dhcp["UseHostname"].emplace_back(conf.hostNameEnabled() ? "true"
+                                                                    : "false");
+            dhcp["SendHostname"].emplace_back(
+                conf.sendHostNameEnabled() ? "true" : "false");
+        }
     }
-
-    // Write the dhcp section irrespective of whether DHCP is enabled or not
-    writeDHCPSection(stream);
-
-    stream.close();
+    auto path = config::pathForIntfConf(manager.getConfDir(), interfaceName());
+    config.writeFile(path);
+    auto msg = fmt::format("Wrote networkd file: {}", path.native());
+    log<level::INFO>(msg.c_str(), entry("FILE=%s", path.c_str()));
 }
 
-void EthernetInterface::writeDHCPSection(std::fstream& stream)
+std::string EthernetInterface::macAddress([[maybe_unused]] std::string value)
 {
-    using namespace std::string_literals;
-    // write the dhcp section
-    stream << "[DHCP]\n";
-
-    // Hardcoding the client identifier to mac, to address below issue
-    // https://github.com/openbmc/openbmc/issues/1280
-    stream << "ClientIdentifier=mac\n";
-    if (manager.getDHCPConf())
-    {
-        auto value = manager.getDHCPConf()->dnsEnabled() ? "true"s : "false"s;
-        stream << "UseDNS="s + value + "\n";
-
-        value = manager.getDHCPConf()->ntpEnabled() ? "true"s : "false"s;
-        stream << "UseNTP="s + value + "\n";
-
-        value = manager.getDHCPConf()->hostNameEnabled() ? "true"s : "false"s;
-        stream << "UseHostname="s + value + "\n";
-
-        value =
-            manager.getDHCPConf()->sendHostNameEnabled() ? "true"s : "false"s;
-        stream << "SendHostname="s + value + "\n";
-    }
-}
-
-std::string EthernetInterface::macAddress(std::string value)
-{
+#ifdef PERSIST_MAC
     ether_addr newMAC;
     try
     {
@@ -1246,15 +1123,14 @@ std::string EthernetInterface::macAddress(std::string value)
         writeConfigurationFile();
         manager.addReloadPreHook([interface]() {
             // The MAC and LLADDRs will only update if the NIC is already down
-            EthernetIntfSocket eifSocket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-            setNICAdminState(eifSocket.sock, interface.c_str(), false);
+            setNICAdminState(interface, false);
         });
         manager.reloadConfigs();
     }
 
 #ifdef HAVE_UBOOT_ENV
     // Ensure that the valid address is stored in the u-boot-env
-    auto envVar = interfaceToUbootEthAddr(interface.c_str());
+    auto envVar = interfaceToUbootEthAddr(interface);
     if (envVar)
     {
         // Trimming MAC addresses that are out of range. eg: AA:FF:FF:FF:FF:100;
@@ -1265,6 +1141,10 @@ std::string EthernetInterface::macAddress(std::string value)
 #endif // HAVE_UBOOT_ENV
 
     return value;
+#else
+    elog<NotAllowed>(
+        NotAllowedArgument::REASON("Writing MAC address is not allowed"));
+#endif // PERSIST_MAC
 }
 
 void EthernetInterface::deleteAll()
@@ -1284,7 +1164,7 @@ std::string EthernetInterface::defaultGateway(std::string gateway)
         return gw;
     }
 
-    if (!isValidIP(AF_INET, gateway))
+    if (!isValidIP(AF_INET, gateway) && !gateway.empty())
     {
         log<level::ERR>("Not a valid v4 Gateway",
                         entry("GATEWAY=%s", gateway.c_str()));
@@ -1307,7 +1187,7 @@ std::string EthernetInterface::defaultGateway6(std::string gateway)
         return gw;
     }
 
-    if (!isValidIP(AF_INET6, gateway))
+    if (!isValidIP(AF_INET6, gateway) && !gateway.empty())
     {
         log<level::ERR>("Not a valid v6 Gateway",
                         entry("GATEWAY=%s", gateway.c_str()));

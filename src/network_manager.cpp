@@ -35,40 +35,27 @@ namespace phosphor
 namespace network
 {
 
+extern std::unique_ptr<Timer> refreshObjectTimer;
 extern std::unique_ptr<Timer> reloadTimer;
 using namespace phosphor::logging;
 using namespace sdbusplus::xyz::openbmc_project::Common::Error;
+using Argument = xyz::openbmc_project::Common::InvalidArgument;
 
-Manager::Manager(sdbusplus::bus::bus& bus, const char* objPath,
+Manager::Manager(sdbusplus::bus_t& bus, const char* objPath,
                  const std::string& path) :
-    details::VLANCreateIface(bus, objPath, details::VLANCreateIface::action::defer_emit),
+    details::VLANCreateIface(bus, objPath,
+                             details::VLANCreateIface::action::defer_emit),
     bus(bus), objectPath(objPath)
 {
     fs::path confDir(path);
     setConfDir(confDir);
 }
 
-bool Manager::createDefaultNetworkFiles(bool force)
+bool Manager::createDefaultNetworkFiles()
 {
     auto isCreated = false;
     try
     {
-        // Directory would have created before with
-        // setConfDir function.
-        if (force)
-        {
-            // Factory Reset case
-            // we need to forcefully write the files
-            // so delete the existing ones.
-            if (fs::is_directory(confDir))
-            {
-                for (const auto& file : fs::directory_iterator(confDir))
-                {
-                    fs::remove(file.path());
-                }
-            }
-        }
-
         auto interfaceStrList = getInterfaces();
         for (const auto& interface : interfaceStrList)
         {
@@ -79,19 +66,13 @@ bool Manager::createDefaultNetworkFiles(bool force)
                 continue;
             }
 
-            auto fileName = systemd::config::networkFilePrefix + interface +
-                            systemd::config::networkFileSuffix;
-
-            fs::path filePath = confDir;
-            filePath /= fileName;
+            fs::path filePath = config::pathForIntfConf(confDir, interface);
 
             // create the interface specific network file
-            // if not exist or we forcefully wants to write
-            // the network file.
-
-            if (force || !fs::is_regular_file(filePath.string()))
+            // if not existing.
+            if (!fs::is_regular_file(filePath))
             {
-                bmc::writeDHCPDefault(filePath.string(), interface);
+                bmc::writeDHCPDefault(filePath, interface);
                 log<level::INFO>("Created the default network file.",
                                  entry("INTERFACE=%s", interface.c_str()));
                 isCreated = true;
@@ -149,18 +130,16 @@ void Manager::createInterfaces()
         }
         // normal ethernet interface
         objPath /= interface;
-
-        auto dhcp = getDHCPValue(confDir, interface);
+        config::Parser config(config::pathForIntfConf(confDir, interface));
 
         auto intf = std::make_shared<phosphor::network::EthernetInterface>(
-            bus, objPath.string(), dhcp, *this);
+            bus, objPath.string(), config, *this);
 
         intf->createIPAddressObjects();
         intf->createStaticNeighborObjects();
-        intf->loadNameServers();
+        intf->loadNameServers(config);
 
-        this->interfaces.emplace(
-            std::make_pair(std::move(interface), std::move(intf)));
+        this->interfaces.emplace(std::move(interface), std::move(intf));
     }
 }
 
@@ -179,7 +158,7 @@ void Manager::createChildObjects()
 
     // create the system conf object.
     systemConf = std::make_unique<phosphor::network::SystemConfiguration>(
-        bus, objPath.string(), *this);
+        bus, objPath.string());
     // create the dhcp conf object.
     objPath /= "dhcp";
     dhcpConf = std::make_unique<phosphor::network::dhcp::Configuration>(
@@ -195,19 +174,28 @@ ObjectPath Manager::vlan(IntfName interfaceName, uint32_t id)
         elog<ResourceNotFound>(ResourceErr::RESOURCE(interfaceName.c_str()));
     }
 
+    if (id == 0 || id >= 4095)
+    {
+        log<level::ERR>("VLAN ID is not valid", entry("VLANID=%u", id));
+        elog<InvalidArgument>(
+            Argument::ARGUMENT_NAME("VLANId"),
+            Argument::ARGUMENT_VALUE(std::to_string(id).c_str()));
+    }
+
     return interfaces[interfaceName]->createVLAN(id);
 }
 
 void Manager::reset()
 {
-    if (!createDefaultNetworkFiles(true))
+    if (fs::is_directory(confDir))
     {
-        log<level::ERR>("Network Factory Reset failed.");
-        return;
-        // TODO: openbmc/openbmc#1721 - Log ResetFailed error here.
+        for (const auto& file : fs::directory_iterator(confDir))
+        {
+            fs::remove(file.path());
+        }
     }
-
-    log<level::INFO>("Network Factory Reset done.");
+    createDefaultNetworkFiles();
+    log<level::INFO>("Network Factory Reset queued.");
 }
 
 // Need to merge the below function with the code which writes the
@@ -258,6 +246,8 @@ void Manager::setFistBootMACOnInterface(
 void Manager::reloadConfigs()
 {
     reloadTimer->restartOnce(reloadTimeout);
+    // Ensure that the next refresh happens after reconfiguration
+    refreshObjectTimer->setRemaining(reloadTimeout + refreshTimeout);
 }
 
 void Manager::doReloadConfigs()
@@ -281,12 +271,14 @@ void Manager::doReloadConfigs()
                                           NETWORKD_INTERFACE, "Reload");
         bus.call_noreply(method);
     }
-    catch (const sdbusplus::exception::exception& ex)
+    catch (const sdbusplus::exception_t& ex)
     {
         log<level::ERR>("Failed to reload configuration",
                         entry("ERR=%s", ex.what()));
         elog<InternalFailure>();
     }
+    // Ensure reconfiguration has enough time
+    refreshObjectTimer->setRemaining(refreshTimeout);
 }
 
 } // namespace network

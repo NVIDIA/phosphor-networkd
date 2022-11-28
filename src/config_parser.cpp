@@ -1,12 +1,18 @@
 #include "config_parser.hpp"
 
-#include <algorithm>
-#include <fstream>
-#include <list>
-#include <phosphor-logging/log.hpp>
-#include <regex>
+#include <fmt/compile.h>
+#include <fmt/format.h>
+
+#include <functional>
+#include <iterator>
+#include <stdexcept>
+#include <stdplus/exception.hpp>
+#include <stdplus/fd/atomic.hpp>
+#include <stdplus/fd/create.hpp>
+#include <stdplus/fd/fmt.hpp>
+#include <stdplus/fd/line.hpp>
 #include <string>
-#include <unordered_map>
+#include <utility>
 
 namespace phosphor
 {
@@ -15,146 +21,293 @@ namespace network
 namespace config
 {
 
-using namespace phosphor::logging;
+using std::literals::string_view_literals::operator""sv;
 
-Parser::Parser(const fs::path& filePath)
+bool icaseeq(std::string_view in, std::string_view expected) noexcept
 {
-    setFile(filePath);
+    return std::equal(in.begin(), in.end(), expected.begin(), expected.end(),
+                      [](auto a, auto b) { return tolower(a) == b; });
 }
 
-std::tuple<ReturnCode, KeyValueMap>
-    Parser::getSection(const std::string& section)
+std::optional<bool> parseBool(std::string_view in) noexcept
 {
-    auto it = sections.find(section);
-    if (it == sections.end())
+    if (in == "1"sv || icaseeq(in, "yes"sv) || icaseeq(in, "y"sv) ||
+        icaseeq(in, "true"sv) || icaseeq(in, "t"sv) || icaseeq(in, "on"sv))
     {
-        KeyValueMap keyValues;
-        return std::make_tuple(ReturnCode::SECTION_NOT_FOUND,
-                               std::move(keyValues));
+        return true;
     }
-
-    return std::make_tuple(ReturnCode::SUCCESS, it->second);
-}
-
-std::tuple<ReturnCode, ValueList> Parser::getValues(const std::string& section,
-                                                    const std::string& key)
-{
-    ValueList values;
-    KeyValueMap keyValues{};
-    auto rc = ReturnCode::SUCCESS;
-
-    std::tie(rc, keyValues) = getSection(section);
-    if (rc != ReturnCode::SUCCESS)
-    {
-        return std::make_tuple(rc, std::move(values));
-    }
-
-    auto it = keyValues.find(key);
-    if (it == keyValues.end())
-    {
-        return std::make_tuple(ReturnCode::KEY_NOT_FOUND, std::move(values));
-    }
-
-    for (; it != keyValues.end() && key == it->first; it++)
-    {
-        values.push_back(it->second);
-    }
-
-    return std::make_tuple(ReturnCode::SUCCESS, std::move(values));
-}
-
-bool Parser::isValueExist(const std::string& section, const std::string& key,
-                          const std::string& value)
-{
-    auto rc = ReturnCode::SUCCESS;
-    ValueList values;
-    std::tie(rc, values) = getValues(section, key);
-
-    if (rc != ReturnCode::SUCCESS)
+    if (in == "0"sv || icaseeq(in, "no"sv) || icaseeq(in, "n"sv) ||
+        icaseeq(in, "false"sv) || icaseeq(in, "f"sv) || icaseeq(in, "off"sv))
     {
         return false;
     }
-    auto it = std::find(values.begin(), values.end(), value);
-    return it != std::end(values) ? true : false;
+    return std::nullopt;
 }
 
-void Parser::setValue(const std::string& section, const std::string& key,
-                      const std::string& value)
+fs::path pathForIntfConf(const fs::path& dir, std::string_view intf)
 {
-    KeyValueMap values;
-    auto it = sections.find(section);
-    if (it != sections.end())
-    {
-        values = std::move(it->second);
-    }
-    values.insert(std::make_pair(key, value));
-
-    if (it != sections.end())
-    {
-        it->second = std::move(values);
-    }
-    else
-    {
-        sections.insert(std::make_pair(section, std::move(values)));
-    }
+    return dir / fmt::format(FMT_COMPILE("00-bmc-{}.network"), intf);
 }
 
-#if 0
-void Parser::print()
+fs::path pathForIntfDev(const fs::path& dir, std::string_view intf)
 {
-    for (auto section : sections)
+    return dir / fmt::format(FMT_COMPILE("{}.netdev"), intf);
+}
+
+const std::string*
+    SectionMap::getLastValueString(std::string_view section,
+                                   std::string_view key) const noexcept
+{
+    auto sit = find(section);
+    if (sit == end())
     {
-        std::cout << "[" << section.first << "]\n\n";
-        for (auto keyValue : section.second)
+        return nullptr;
+    }
+    for (auto it = sit->second.rbegin(); it != sit->second.rend(); ++it)
+    {
+        auto kit = it->find(key);
+        if (kit == it->end() || kit->second.empty())
         {
-            std::cout << keyValue.first << "=" << keyValue.second << "\n";
+            continue;
+        }
+        return &kit->second.back().get();
+    }
+    return nullptr;
+}
+
+std::vector<std::string> SectionMap::getValueStrings(std::string_view section,
+                                                     std::string_view key) const
+{
+    return getValues(section, key,
+                     [](const Value& v) { return std::string(v); });
+}
+
+void KeyCheck::operator()(const std::string& s)
+{
+    for (auto c : s)
+    {
+        if (c == '\n' || c == '=')
+        {
+            throw std::invalid_argument(
+                fmt::format(FMT_COMPILE("Invalid Config Key: {}"), s));
         }
     }
 }
-#endif
 
-void Parser::setFile(const fs::path& filePath)
+void SectionCheck::operator()(const std::string& s)
 {
-    this->filePath = filePath;
-    std::fstream stream(filePath, std::fstream::in);
-
-    if (!stream.is_open())
+    for (auto c : s)
     {
-        return;
+        if (c == '\n' || c == ']')
+        {
+            throw std::invalid_argument(
+                fmt::format(FMT_COMPILE("Invalid Config Section: {}"), s));
+        }
     }
-    // clear all the section data.
-    sections.clear();
-    parse(stream);
 }
 
-void Parser::parse(std::istream& in)
+void ValueCheck::operator()(const std::string& s)
 {
-    static const std::regex commentRegex{R"x(\s*[;#])x"};
-    static const std::regex sectionRegex{R"x(\s*\[([^\]]+)\])x"};
-    static const std::regex valueRegex{R"x(\s*(\S[^ \t=]*)\s*=\s*(\S+)\s*$)x"};
-    std::string section;
-    std::smatch pieces;
-    for (std::string line; std::getline(in, line);)
+    for (auto c : s)
     {
-        if (line.empty() || std::regex_match(line, pieces, commentRegex))
+        if (c == '\n')
         {
-            // skip comment lines and blank lines
+            throw std::invalid_argument(
+                fmt::format(FMT_COMPILE("Invalid Config Value: {}"), s));
         }
-        else if (std::regex_match(line, pieces, sectionRegex))
+    }
+}
+
+Parser::Parser(const fs::path& filename)
+{
+    setFile(filename);
+}
+
+inline bool isspace(char c) noexcept
+{
+    return c == ' ' || c == '\t';
+}
+
+inline bool iscomment(char c) noexcept
+{
+    return c == '#' || c == ';';
+}
+
+static void removePadding(std::string_view& str) noexcept
+{
+    size_t idx = str.size();
+    for (; idx > 0 && isspace(str[idx - 1]); idx--)
+        ;
+    str.remove_suffix(str.size() - idx);
+
+    idx = 0;
+    for (; idx < str.size() && isspace(str[idx]); idx++)
+        ;
+    str.remove_prefix(idx);
+}
+
+struct Parse
+{
+    std::reference_wrapper<const fs::path> filename;
+    SectionMap map;
+    KeyValuesMap* section;
+    std::vector<std::string> warnings;
+    size_t lineno;
+
+    inline Parse(const fs::path& filename) :
+        filename(filename), section(nullptr), lineno(0)
+    {
+    }
+
+    void pumpSection(std::string_view line)
+    {
+        auto cpos = line.find(']');
+        if (cpos == line.npos)
         {
-            if (pieces.size() == 2)
+            warnings.emplace_back(fmt::format("{}:{}: Section missing ]",
+                                              filename.get().native(), lineno));
+        }
+        else
+        {
+            for (auto c : line.substr(cpos + 1))
             {
-                section = pieces[1].str();
+                if (!isspace(c))
+                {
+                    warnings.emplace_back(
+                        fmt::format("{}:{}: Characters outside section name",
+                                    filename.get().native(), lineno));
+                    break;
+                }
             }
         }
-        else if (std::regex_match(line, pieces, valueRegex))
+        auto s = line.substr(0, cpos);
+        auto it = map.find(s);
+        if (it == map.end())
         {
-            if (pieces.size() == 3)
+            std::tie(it, std::ignore) = map.emplace(
+                Section(Section::unchecked(), s), KeyValuesMapList{});
+        }
+        section = &it->second.emplace_back();
+    }
+
+    void pumpKV(std::string_view line)
+    {
+        auto epos = line.find('=');
+        std::vector<std::string> new_warnings;
+        if (epos == line.npos)
+        {
+            new_warnings.emplace_back(fmt::format(
+                "{}:{}: KV missing `=`", filename.get().native(), lineno));
+        }
+        auto k = line.substr(0, epos);
+        removePadding(k);
+        if (section == nullptr)
+        {
+            new_warnings.emplace_back(
+                fmt::format("{}:{}: Key `{}` missing section",
+                            filename.get().native(), lineno, k));
+        }
+        if (!new_warnings.empty())
+        {
+            warnings.insert(warnings.end(),
+                            std::make_move_iterator(new_warnings.begin()),
+                            std::make_move_iterator(new_warnings.end()));
+            return;
+        }
+        auto v = line.substr(epos + 1);
+        removePadding(v);
+
+        auto it = section->find(k);
+        if (it == section->end())
+        {
+            std::tie(it, std::ignore) =
+                section->emplace(Key(Key::unchecked(), k), ValueList{});
+        }
+        it->second.emplace_back(Value::unchecked(), v);
+    }
+
+    void pump(std::string_view line)
+    {
+        lineno++;
+        for (size_t i = 0; i < line.size(); ++i)
+        {
+            auto c = line[i];
+            if (iscomment(c))
             {
-                setValue(section, pieces[1].str(), pieces[2].str());
+                return;
+            }
+            else if (c == '[')
+            {
+                return pumpSection(line.substr(i + 1));
+            }
+            else if (!isspace(c))
+            {
+                return pumpKV(line.substr(i));
             }
         }
     }
+};
+
+void Parser::setFile(const fs::path& filename)
+{
+    Parse parse(filename);
+
+    try
+    {
+        auto fd = stdplus::fd::open(filename.c_str(),
+                                    stdplus::fd::OpenAccess::ReadOnly);
+        stdplus::fd::LineReader reader(fd);
+        while (true)
+        {
+            parse.pump(*reader.readLine());
+        }
+    }
+    catch (const stdplus::exception::Eof&)
+    {
+    }
+    catch (const std::exception& e)
+    {
+        // TODO: Pass exceptions once callers can handle them
+        parse.warnings.emplace_back(
+            fmt::format("{}: Read error: {}", filename.native(), e.what()));
+    }
+
+    this->map = std::move(parse.map);
+    this->filename = filename;
+    this->warnings = std::move(parse.warnings);
+}
+
+static void writeFileInt(const SectionMap& map, const fs::path& filename)
+{
+    stdplus::fd::AtomicWriter writer(filename, 0644);
+    stdplus::fd::FormatBuffer out(writer);
+    for (const auto& [section, maps] : map)
+    {
+        for (const auto& map : maps)
+        {
+            out.append(FMT_COMPILE("[{}]\n"), section.get());
+            for (const auto& [key, vals] : map)
+            {
+                for (const auto& val : vals)
+                {
+                    out.append(FMT_COMPILE("{}={}\n"), key.get(), val.get());
+                }
+            }
+        }
+    }
+    out.flush();
+    writer.commit();
+}
+
+void Parser::writeFile() const
+{
+    writeFileInt(map, filename);
+}
+
+void Parser::writeFile(const fs::path& filename)
+{
+    writeFileInt(map, filename);
+    this->filename = filename;
 }
 
 } // namespace config

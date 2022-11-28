@@ -12,7 +12,7 @@
 #include <exception>
 #include <fstream>
 #include <sdbusplus/bus.hpp>
-#include <xyz/openbmc_project/Common/error.hpp>
+#include <stdplus/gtest/tmp.hpp>
 
 #include <gtest/gtest.h>
 
@@ -21,46 +21,30 @@ namespace phosphor
 namespace network
 {
 
-class TestEthernetInterface : public testing::Test
+class TestEthernetInterface : public stdplus::gtest::TestWithTmp
 {
   public:
-    sdbusplus::bus::bus bus;
+    sdbusplus::bus_t bus;
+    std::string confDir;
     MockManager manager;
     MockEthernetInterface interface;
-    std::string confDir;
     TestEthernetInterface() :
-        bus(sdbusplus::bus::new_default()),
-        manager(bus, "/xyz/openbmc_test/network", "/tmp/"),
+        bus(sdbusplus::bus::new_default()), confDir(CaseTmpDir()),
+        manager(bus, "/xyz/openbmc_test/network", confDir),
         interface(makeInterface(bus, manager))
 
     {
-        setConfDir();
-    }
-
-    void setConfDir()
-    {
-        char tmp[] = "/tmp/EthernetInterface.XXXXXX";
-        confDir = mkdtemp(tmp);
-        manager.setConfDir(confDir);
-    }
-
-    ~TestEthernetInterface()
-    {
-        if (confDir != "")
-        {
-            fs::remove_all(confDir);
-        }
     }
 
     static constexpr ether_addr mac{0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
 
-    static MockEthernetInterface makeInterface(sdbusplus::bus::bus& bus,
+    static MockEthernetInterface makeInterface(sdbusplus::bus_t& bus,
                                                MockManager& manager)
     {
         mock_clear();
         mock_addIF("test0", 1, mac);
-        return {bus, "/xyz/openbmc_test/network/test0",
-                EthernetInterface::DHCPConf::none, manager, true};
+        return {bus, "/xyz/openbmc_test/network/test0", config::Parser(),
+                manager, true};
     }
 
     int countIPObjects()
@@ -177,17 +161,7 @@ TEST_F(TestEthernetInterface, addStaticNameServers)
     fs::path filePath = confDir;
     filePath /= "00-bmc-test0.network";
     config::Parser parser(filePath.string());
-    config::ReturnCode rc = config::ReturnCode::SUCCESS;
-    config::ValueList values;
-    std::tie(rc, values) = parser.getValues("Network", "DNS");
-    EXPECT_EQ(servers, values);
-}
-
-TEST_F(TestEthernetInterface, addDynamicNameServers)
-{
-    using namespace sdbusplus::xyz::openbmc_project::Common::Error;
-    ServerList servers = {"9.1.1.1", "9.2.2.2", "9.3.3.3"};
-    EXPECT_THROW(interface.nameservers(servers), NotAllowed);
+    EXPECT_EQ(servers, parser.map.getValueStrings("Network", "DNS"));
 }
 
 TEST_F(TestEthernetInterface, getDynamicNameServers)
@@ -206,10 +180,7 @@ TEST_F(TestEthernetInterface, addNTPServers)
     fs::path filePath = confDir;
     filePath /= "00-bmc-test0.network";
     config::Parser parser(filePath.string());
-    config::ReturnCode rc = config::ReturnCode::SUCCESS;
-    config::ValueList values;
-    std::tie(rc, values) = parser.getValues("Network", "NTP");
-    EXPECT_EQ(servers, values);
+    EXPECT_EQ(servers, parser.map.getValueStrings("Network", "NTP"));
 }
 
 TEST_F(TestEthernetInterface, addGateway)
@@ -217,6 +188,8 @@ TEST_F(TestEthernetInterface, addGateway)
     std::string gateway = "10.3.3.3";
     interface.defaultGateway(gateway);
     EXPECT_EQ(interface.defaultGateway(), gateway);
+    interface.defaultGateway("");
+    EXPECT_EQ(interface.defaultGateway(), "");
 }
 
 TEST_F(TestEthernetInterface, addGateway6)
@@ -224,6 +197,52 @@ TEST_F(TestEthernetInterface, addGateway6)
     std::string gateway6 = "ffff:ffff:ffff:fe80::1";
     interface.defaultGateway6(gateway6);
     EXPECT_EQ(interface.defaultGateway6(), gateway6);
+    interface.defaultGateway6("");
+    EXPECT_EQ(interface.defaultGateway6(), "");
+}
+
+TEST_F(TestEthernetInterface, DHCPEnabled)
+{
+    EXPECT_CALL(manager, reloadConfigs()).WillRepeatedly(testing::Return());
+
+    using DHCPConf = EthernetInterfaceIntf::DHCPConf;
+    auto test = [&](DHCPConf conf, bool dhcp4, bool dhcp6, bool ra) {
+        EXPECT_EQ(conf, interface.dhcpEnabled());
+        EXPECT_EQ(dhcp4, interface.dhcp4());
+        EXPECT_EQ(dhcp6, interface.dhcp6());
+        EXPECT_EQ(ra, interface.ipv6AcceptRA());
+    };
+    test(DHCPConf::both, /*dhcp4=*/true, /*dhcp6=*/true, /*ra=*/true);
+
+    auto set_test = [&](DHCPConf conf, bool dhcp4, bool dhcp6, bool ra) {
+        EXPECT_EQ(conf, interface.dhcpEnabled(conf));
+        test(conf, dhcp4, dhcp6, ra);
+    };
+    set_test(DHCPConf::none, /*dhcp4=*/false, /*dhcp6=*/false, /*ra=*/false);
+    set_test(DHCPConf::v4, /*dhcp4=*/true, /*dhcp6=*/false, /*ra=*/false);
+    set_test(DHCPConf::v6stateless, /*dhcp4=*/false, /*dhcp6=*/false,
+             /*ra=*/true);
+    set_test(DHCPConf::v6, /*dhcp4=*/false, /*dhcp6=*/true, /*ra=*/true);
+    set_test(DHCPConf::v4v6stateless, /*dhcp4=*/true, /*dhcp6=*/false,
+             /*ra=*/true);
+    set_test(DHCPConf::both, /*dhcp4=*/true, /*dhcp6=*/true, /*ra=*/true);
+
+    auto ind_test = [&](DHCPConf conf, bool dhcp4, bool dhcp6, bool ra) {
+        EXPECT_EQ(dhcp4, interface.dhcp4(dhcp4));
+        EXPECT_EQ(dhcp6, interface.dhcp6(dhcp6));
+        EXPECT_EQ(ra, interface.ipv6AcceptRA(ra));
+        test(conf, dhcp4, dhcp6, ra);
+    };
+    ind_test(DHCPConf::none, /*dhcp4=*/false, /*dhcp6=*/false, /*ra=*/false);
+    ind_test(DHCPConf::v4, /*dhcp4=*/true, /*dhcp6=*/false, /*ra=*/false);
+    ind_test(DHCPConf::v6stateless, /*dhcp4=*/false, /*dhcp6=*/false,
+             /*ra=*/true);
+    ind_test(DHCPConf::v6, /*dhcp4=*/false, /*dhcp6=*/true, /*ra=*/false);
+    set_test(DHCPConf::v6, /*dhcp4=*/false, /*dhcp6=*/true, /*ra=*/true);
+    ind_test(DHCPConf::v4v6stateless, /*dhcp4=*/true, /*dhcp6=*/false,
+             /*ra=*/true);
+    ind_test(DHCPConf::both, /*dhcp4=*/true, /*dhcp6=*/true, /*ra=*/false);
+    set_test(DHCPConf::both, /*dhcp4=*/true, /*dhcp6=*/true, /*ra=*/true);
 }
 
 } // namespace network

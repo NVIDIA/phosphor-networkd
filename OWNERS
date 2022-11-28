@@ -20,7 +20,7 @@
 #   * reviewers: A list of individuals who have requested review notification
 #     on the repository.
 #
-#   * matches: A list of specific file/path matches for granular 'owners' and
+#   * matchers: A list of specific file/path matchers for granular 'owners' and
 #     'reviewers'.  See 'owners' plugin documentation.
 #
 #   * openbmc: A list of openbmc-specific meta-data about owners and reviewers.
@@ -37,20 +37,20 @@ owners:
 
 reviewers:
 - anoo@us.ibm.com
-- ngorugan@in.ibm.com
+- sunithaharish04@gmail.com
 
-matches:
+matchers:
 
 openbmc:
 - name: Adriana Kobylak
   email: anoo@us.ibm.com
   discord: anoo
-- name: Nagaraju Goruganti
-  email: ngorugan@in.ibm.com
-  discord: NA
 - name: Ratan Gupta
   email: ratankgupta31@gmail.com
   discord: rgupta
 - name: William Kennington
   email: wak@google.com
   discord: wak
+- name: Sunitha Harish
+  email: sunithaharish04@gmail.com
+  discord: Sunitha Harish

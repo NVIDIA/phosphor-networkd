@@ -1,6 +1,4 @@
-phosphor_logging_dep = dependency(
-  'phosphor-logging',
-  fallback: ['phosphor-logging', 'phosphor_logging_dep'])
+phosphor_logging_dep = dependency('phosphor-logging')
 
 src_includes = include_directories('.')
 
@@ -30,8 +28,6 @@ executable(
     fmt_dep,
     dependency('libnl-3.0'),
     dependency('libnl-genl-3.0'),
-    phosphor_dbus_interfaces_dep,
-    phosphor_logging_dep,
   ],
   install: true,
   install_dir: get_option('bindir'))
@@ -45,10 +41,7 @@ if get_option('sync-mac')
     'nlohmann::json::string_t',
     required: false)
   if not has_json
-    json_dep = dependency(
-      'nlohmann_json',
-      fallback: ['nlohmann_json', 'nlohmann_json_dep'],
-      required: true)
+    json_dep = dependency('nlohmann_json')
   endif
 endif
 
@@ -58,8 +51,8 @@ networkd_deps = [
   phosphor_logging_dep,
   networkd_dbus_dep,
   sdbusplus_dep,
-  dependency('sdeventplus', fallback: ['sdeventplus', 'sdeventplus_dep']),
-  dependency('stdplus', fallback: ['stdplus', 'stdplus_dep']),
+  dependency('sdeventplus'),
+  dependency('stdplus'),
 ]
 
 conf_header = configure_file(
@@ -83,7 +76,6 @@ networkd_lib = static_library(
   'vlan_interface.cpp',
   'rtnetlink_server.cpp',
   'dns_updater.cpp',
-  'watch.cpp',
   'network_monitor.cpp',
   implicit_include_directories: false,
   include_directories: src_includes,

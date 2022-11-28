@@ -1,5 +1,6 @@
 #pragma once
 
+#include "hyp_sys_config.hpp"
 #include "types.hpp"
 #include "util.hpp"
 
@@ -13,6 +14,7 @@ namespace network
 {
 
 class HypEthInterface;
+class HypSysConfig;
 
 using biosAttrName = std::string;
 using biosAttrType = std::string;
@@ -45,6 +47,8 @@ enum BiosBaseTableIndex
     biosBaseOptions
 };
 
+using SystemConfPtr = std::unique_ptr<HypSysConfig>;
+
 /** @class Manager
  *  @brief Implementation for the
  *         xyz.openbmc_project.Network.Hypervisor DBus API.
@@ -64,14 +68,10 @@ class HypNetworkMgr
      *  @param[in] event - event.
      *  @param[in] path - Path to attach at.
      */
-    HypNetworkMgr(sdbusplus::bus::bus& bus, sdeventplus::Event& event,
+    HypNetworkMgr(sdbusplus::bus_t& bus, sdeventplus::Event& event,
                   const char* path) :
         bus(bus),
-        event(event), objectPath(path)
-    {
-        // Create the hypervisor eth interface objects
-        createIfObjects();
-    };
+        event(event), objectPath(path){};
 
     /** @brief Get the BaseBiosTable attributes
      *
@@ -91,7 +91,36 @@ class HypNetworkMgr
                           std::variant<std::string, int64_t> attrValue,
                           std::string attrType);
 
-  private:
+    /** @brief Method to set all the interface 0 attributes
+     *         to its default value in biosTableAttrs data member
+     */
+    void setDefaultBIOSTableAttrsOnIntf(const std::string& intf);
+
+    /** @brief Method to set the hostname attribute
+     *         to its default value in biosTableAttrs
+     *         data member
+     */
+    void setDefaultHostnameInBIOSTableAttrs();
+
+    /** @brief Fetch the interface and the ipaddress details
+     *         from the Bios table and create the hyp ethernet interfaces
+     *         dbus object.
+     */
+    void createIfObjects();
+
+    /** @brief Creates system config object
+     */
+    void createSysConfObj();
+
+    /** @brief gets the system conf object.
+     *
+     */
+    const SystemConfPtr& getSystemConf()
+    {
+        return systemConf;
+    }
+
+  protected:
     /**
      * @brief get Dbus Prop
      *
@@ -104,18 +133,6 @@ class HypNetworkMgr
     auto getDBusProp(const std::string& objectName,
                      const std::string& interface, const std::string& kw);
 
-    /** @brief Fetch the interface and the ipaddress details
-     *         from the Bios table and create the hyp ethernet interfaces
-     *         dbus object.
-     */
-    void createIfObjects();
-
-    /** @brief Get the hypervisor eth interfaces count
-     *
-     *  @return number of interfaces
-     */
-    uint16_t getIntfCount();
-
     /** @brief Setter method for biosTableAttrs data member
      *         GET operation on the BIOS table to
      *         read all the hyp attrbutes (name, value pair)
@@ -124,7 +141,7 @@ class HypNetworkMgr
     void setBIOSTableAttrs();
 
     /** @brief sdbusplus DBus bus connection. */
-    sdbusplus::bus::bus& bus;
+    sdbusplus::bus_t& bus;
 
     /**  sdevent Event handle. */
     sdeventplus::Event& event;
@@ -132,13 +149,13 @@ class HypNetworkMgr
     /** @brief object path */
     std::string objectPath;
 
+    /** @brief pointer to system conf object. */
+    SystemConfPtr systemConf = nullptr;
+
     /** @brief Persistent map of EthernetInterface dbus
      *         objects and their names
      */
     std::map<std::string, std::shared_ptr<HypEthInterface>> interfaces;
-
-    /** @brief interface count */
-    uint16_t intfCount;
 
     /** @brief map of bios table attrs and values */
     std::map<biosAttrName, biosAttrCurrValue> biosTableAttrs;

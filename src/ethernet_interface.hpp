@@ -1,14 +1,13 @@
 #pragma once
-
 #include "types.hpp"
-#include "util.hpp"
 #include "xyz/openbmc_project/Network/IP/Create/server.hpp"
 #include "xyz/openbmc_project/Network/Neighbor/CreateStatic/server.hpp"
 
-#include <filesystem>
+#include <map>
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/server/object.hpp>
 #include <string>
+#include <vector>
 #include <xyz/openbmc_project/Collection/DeleteAll/server.hpp>
 #include <xyz/openbmc_project/Network/EthernetInterface/server.hpp>
 #include <xyz/openbmc_project/Network/MACAddress/server.hpp>
@@ -18,7 +17,7 @@ namespace phosphor
 namespace network
 {
 
-using Ifaces = sdbusplus::server::object::object<
+using Ifaces = sdbusplus::server::object_t<
     sdbusplus::xyz::openbmc_project::Network::server::EthernetInterface,
     sdbusplus::xyz::openbmc_project::Network::server::MACAddress,
     sdbusplus::xyz::openbmc_project::Network::IP::server::Create,
@@ -35,8 +34,6 @@ using MacAddressIntf =
 using ServerList = std::vector<std::string>;
 using ObjectPath = sdbusplus::message::object_path;
 
-namespace fs = std::filesystem;
-
 class Manager; // forward declaration of network manager.
 
 class TestEthernetInterface;
@@ -46,6 +43,11 @@ class VlanInterface;
 class IPAddress;
 
 class Neighbor;
+
+namespace config
+{
+class Parser;
+}
 
 using LinkSpeed = uint16_t;
 using DuplexMode = uint8_t;
@@ -80,20 +82,20 @@ class EthernetInterface : public Ifaces
     /** @brief Constructor to put object onto bus at a dbus path.
      *  @param[in] bus - Bus to attach to.
      *  @param[in] objPath - Path to attach at.
-     *  @param[in] dhcpEnabled - is dhcp enabled(true/false).
+     *  @param[in] config - The parsed configuation file.
      *  @param[in] parent - parent object.
      *  @param[in] emitSignal - true if the object added signal needs to be
      *                          send.
      *  @param[in] enabled - Override the lookup of nicEnabled
      */
-    EthernetInterface(sdbusplus::bus::bus& bus, const std::string& objPath,
-                      DHCPConf dhcpEnabled, Manager& parent,
+    EthernetInterface(sdbusplus::bus_t& bus, const std::string& objPath,
+                      const config::Parser& config, Manager& parent,
                       bool emitSignal = true,
                       std::optional<bool> enabled = std::nullopt);
 
     /** @brief Function used to load the nameservers.
      */
-    virtual void loadNameServers();
+    void loadNameServers(const config::Parser& config);
 
     /** @brief Function to create ipAddress dbus object.
      *  @param[in] addressType - Type of ip address.
@@ -158,13 +160,12 @@ class EthernetInterface : public Ifaces
     }
 
     /** Set value of DHCPEnabled */
+    DHCPConf dhcpEnabled() const override;
     DHCPConf dhcpEnabled(DHCPConf value) override;
-
-    /** @brief Selectively disables DHCP
-     *  @param[in] protocol - The IPv4 or IPv6 protocol to return to static
-     *                        addressing mode
-     */
-    void disableDHCP(IP::Protocol protocol);
+    using EthernetInterfaceIntf::dhcp4;
+    bool dhcp4(bool value) override;
+    using EthernetInterfaceIntf::dhcp6;
+    bool dhcp6(bool value) override;
 
     /** Retrieve Link State */
     bool linkUp() const override;
@@ -184,25 +185,16 @@ class EthernetInterface : public Ifaces
      */
     std::string macAddress(std::string value) override;
 
-    /** @brief get the IPv6AcceptRA flag from the network configuration file
-     *
-     */
-    bool getIPv6AcceptRAFromConf();
-
     /** @brief check conf file for Router Advertisements
      *
      */
     bool ipv6AcceptRA(bool value) override;
+    using EthernetInterfaceIntf::ipv6AcceptRA;
 
     /** @brief sets the NTP servers.
      *  @param[in] value - vector of NTP servers.
      */
     ServerList ntpServers(ServerList value) override;
-
-    /** @brief sets the DNS/nameservers.
-     *  @param[in] value - vector of DNS servers.
-     */
-    ServerList nameservers(ServerList value) override;
 
     /** @brief sets the Static DNS/nameservers.
      *  @param[in] value - vector of DNS servers.
@@ -239,7 +231,6 @@ class EthernetInterface : public Ifaces
      */
     std::string defaultGateway6(std::string gateway) override;
 
-    using EthernetInterfaceIntf::dhcpEnabled;
     using EthernetInterfaceIntf::interfaceName;
     using EthernetInterfaceIntf::linkUp;
     using EthernetInterfaceIntf::mtu;
@@ -312,9 +303,6 @@ class EthernetInterface : public Ifaces
     static std::string generateNeighborId(const std::string& ipAddress,
                                           const std::string& macAddress);
 
-    /** @brief write the dhcp section **/
-    void writeDHCPSection(std::fstream& stream);
-
     /** @brief get the NTP server list from the network conf
      *
      */
@@ -324,10 +312,9 @@ class EthernetInterface : public Ifaces
      *
      */
     virtual ServerList getNameServerFromResolvd();
-    ServerList getstaticNameServerFromConf();
 
     /** @brief Persistent sdbusplus DBus bus connection. */
-    sdbusplus::bus::bus& bus;
+    sdbusplus::bus_t& bus;
 
     /** @brief Network Manager object. */
     Manager& manager;
@@ -363,6 +350,9 @@ class EthernetInterface : public Ifaces
      *  @returns true/false value if the NIC is enabled
      */
     bool queryNicEnabled() const;
+
+    std::string vlanIntfName(VlanId id) const;
+    std::string vlanObjPath(VlanId id) const;
 };
 
 } // namespace network

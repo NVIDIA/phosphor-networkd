@@ -1,3 +1,5 @@
+#include "config.h"
+
 #include "util.hpp"
 
 #include "config_parser.hpp"
@@ -12,9 +14,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <list>
 #ifdef SYNC_MAC_FROM_INVENTORY
@@ -33,35 +35,22 @@ namespace phosphor
 namespace network
 {
 
+using std::literals::string_view_literals::operator""sv;
 using namespace phosphor::logging;
 using namespace sdbusplus::xyz::openbmc_project::Common::Error;
-namespace fs = std::filesystem;
 
 namespace internal
 {
 
-void executeCommandinChildProcess(const char* path, char** args)
+void executeCommandinChildProcess(stdplus::const_zstring path, char** args)
 {
     using namespace std::string_literals;
     pid_t pid = fork();
-    int status{};
 
     if (pid == 0)
     {
-        execv(path, args);
-        auto error = errno;
-        // create the command from var args.
-        std::string command = path + " "s;
-
-        for (int i = 0; args[i]; i++)
-        {
-            command += args[i] + " "s;
-        }
-
-        log<level::ERR>("Couldn't exceute the command",
-                        entry("ERRNO=%d", error),
-                        entry("CMD=%s", command.c_str()));
-        elog<InternalFailure>();
+        execv(path.c_str(), args);
+        exit(255);
     }
     else if (pid < 0)
     {
@@ -71,10 +60,11 @@ void executeCommandinChildProcess(const char* path, char** args)
     }
     else if (pid > 0)
     {
+        int status;
         while (waitpid(pid, &status, 0) == -1)
         {
             if (errno != EINTR)
-            { // Error other than EINTR
+            {
                 status = -1;
                 break;
             }
@@ -82,14 +72,15 @@ void executeCommandinChildProcess(const char* path, char** args)
 
         if (status < 0)
         {
-            std::string command = path + " "s;
-            for (int i = 0; args[i]; i++)
+            fmt::memory_buffer buf;
+            fmt::format_to(fmt::appender(buf), "`{}`", path);
+            for (size_t i = 0; args[i] != nullptr; ++i)
             {
-                command += args[i] + " "s;
+                fmt::format_to(fmt::appender(buf), " `{}`", args[i]);
             }
-
+            buf.push_back('\0');
             log<level::ERR>("Unable to execute the command",
-                            entry("CMD=%s", command.c_str()),
+                            entry("CMD=%s", buf.data()),
                             entry("STATUS=%d", status));
             elog<InternalFailure>();
         }
@@ -108,9 +99,10 @@ std::string_view getIgnoredInterfacesEnv()
 }
 
 /** @brief Parse the comma separated interface names */
-std::set<std::string_view> parseInterfaces(std::string_view interfaces)
+std::unordered_set<std::string_view>
+    parseInterfaces(std::string_view interfaces)
 {
-    std::set<std::string_view> result;
+    std::unordered_set<std::string_view> result;
     while (true)
     {
         auto sep = interfaces.find(',');
@@ -137,50 +129,13 @@ std::set<std::string_view> parseInterfaces(std::string_view interfaces)
 }
 
 /** @brief Get the ignored interfaces */
-const std::set<std::string_view>& getIgnoredInterfaces()
+const std::unordered_set<std::string_view>& getIgnoredInterfaces()
 {
     static auto ignoredInterfaces = parseInterfaces(getIgnoredInterfacesEnv());
     return ignoredInterfaces;
 }
 
 } // namespace internal
-
-uint8_t toCidr(int addressFamily, const std::string& subnetMask)
-{
-    uint32_t subnet[sizeof(in6_addr) / sizeof(uint32_t)];
-    if (inet_pton(addressFamily, subnetMask.c_str(), &subnet) != 1)
-    {
-        log<level::ERR>("inet_pton failed:",
-                        entry("SUBNETMASK=%s", subnetMask.c_str()));
-        return 0;
-    }
-
-    static_assert(sizeof(in6_addr) % sizeof(uint32_t) == 0);
-    static_assert(sizeof(in_addr) % sizeof(uint32_t) == 0);
-    auto i = (addressFamily == AF_INET ? sizeof(in_addr) : sizeof(in6_addr)) /
-             sizeof(uint32_t);
-    while (i > 0)
-    {
-        if (subnet[--i] != 0)
-        {
-            auto v = be32toh(subnet[i]);
-            static_assert(sizeof(unsigned) == sizeof(uint32_t));
-            auto trailing = __builtin_ctz(v);
-            auto ret = (i + 1) * 32 - trailing;
-            bool valid = ~v == 0 || 32 == trailing + __builtin_clz(~v);
-            while (i > 0 && (valid = (~subnet[--i] == 0) && valid))
-                ;
-            if (!valid)
-            {
-                log<level::ERR>("Invalid netmask",
-                                entry("SUBNETMASK=%s", subnetMask.c_str()));
-                return 0;
-            }
-            return ret;
-        }
-    }
-    return 0;
-}
 
 std::string toMask(int addressFamily, uint8_t prefix)
 {
@@ -272,15 +227,9 @@ std::string toString(const InAddrAny& addr)
     throw std::runtime_error("Invalid addr type");
 }
 
-bool isLinkLocalIP(const std::string& address)
-{
-    return address.find(IPV4_PREFIX) == 0 || address.find(IPV6_PREFIX) == 0;
-}
-
-bool isValidIP(int addressFamily, const std::string& address)
+bool isValidIP(int addressFamily, stdplus::const_zstring address)
 {
     unsigned char buf[sizeof(struct in6_addr)];
-
     return inet_pton(addressFamily, address.c_str(), buf) > 0;
 }
 
@@ -305,81 +254,6 @@ bool isValidPrefix(int addressFamily, uint8_t prefixLength)
     }
 
     return true;
-}
-
-IntfAddrMap getInterfaceAddrs()
-{
-    IntfAddrMap intfMap{};
-    struct ifaddrs* ifaddr = nullptr;
-
-    // attempt to fill struct with ifaddrs
-    if (getifaddrs(&ifaddr) == -1)
-    {
-        auto error = errno;
-        log<level::ERR>("Error occurred during the getifaddrs call",
-                        entry("ERRNO=%s", strerror(error)));
-        elog<InternalFailure>();
-    }
-
-    AddrPtr ifaddrPtr(ifaddr);
-    ifaddr = nullptr;
-
-    std::string intfName{};
-
-    for (ifaddrs* ifa = ifaddrPtr.get(); ifa != nullptr; ifa = ifa->ifa_next)
-    {
-        // walk interfaces
-        if (ifa->ifa_addr == nullptr)
-        {
-            continue;
-        }
-
-        // get only INET interfaces not ipv6
-        if (ifa->ifa_addr->sa_family == AF_INET ||
-            ifa->ifa_addr->sa_family == AF_INET6)
-        {
-            // if loopback, or not running ignore
-            if ((ifa->ifa_flags & IFF_LOOPBACK) ||
-                !(ifa->ifa_flags & IFF_RUNNING))
-            {
-                continue;
-            }
-            intfName = ifa->ifa_name;
-            AddrInfo info{};
-            char ip[INET6_ADDRSTRLEN] = {0};
-            char subnetMask[INET6_ADDRSTRLEN] = {0};
-
-            if (ifa->ifa_addr->sa_family == AF_INET)
-            {
-
-                inet_ntop(ifa->ifa_addr->sa_family,
-                          &(((struct sockaddr_in*)(ifa->ifa_addr))->sin_addr),
-                          ip, sizeof(ip));
-
-                inet_ntop(
-                    ifa->ifa_addr->sa_family,
-                    &(((struct sockaddr_in*)(ifa->ifa_netmask))->sin_addr),
-                    subnetMask, sizeof(subnetMask));
-            }
-            else
-            {
-                inet_ntop(ifa->ifa_addr->sa_family,
-                          &(((struct sockaddr_in6*)(ifa->ifa_addr))->sin6_addr),
-                          ip, sizeof(ip));
-
-                inet_ntop(
-                    ifa->ifa_addr->sa_family,
-                    &(((struct sockaddr_in6*)(ifa->ifa_netmask))->sin6_addr),
-                    subnetMask, sizeof(subnetMask));
-            }
-
-            info.addrType = ifa->ifa_addr->sa_family;
-            info.ipaddress = ip;
-            info.prefix = toCidr(info.addrType, std::string(subnetMask));
-            intfMap[intfName].push_back(info);
-        }
-    }
-    return intfMap;
 }
 
 InterfaceList getInterfaces()
@@ -409,12 +283,12 @@ InterfaceList getInterfaces()
         {
             continue;
         }
-        interfaces.emplace(ifa->ifa_name);
+        interfaces.emplace_back(ifa->ifa_name);
     }
     return interfaces;
 }
 
-void deleteInterface(const std::string& intf)
+void deleteInterface(stdplus::const_zstring intf)
 {
     pid_t pid = fork();
     int status{};
@@ -455,22 +329,18 @@ void deleteInterface(const std::string& intf)
     }
 }
 
-std::optional<std::string> interfaceToUbootEthAddr(const char* intf)
+std::optional<std::string> interfaceToUbootEthAddr(std::string_view intf)
 {
-    constexpr char ethPrefix[] = "eth";
-    constexpr size_t ethPrefixLen = sizeof(ethPrefix) - 1;
-    if (strncmp(ethPrefix, intf, ethPrefixLen) != 0)
+    constexpr auto pfx = "eth"sv;
+    if (!intf.starts_with(pfx))
     {
         return std::nullopt;
     }
-    const auto intfSuffix = intf + ethPrefixLen;
-    if (intfSuffix[0] == '\0')
-    {
-        return std::nullopt;
-    }
-    char* end;
-    unsigned long idx = strtoul(intfSuffix, &end, 10);
-    if (end[0] != '\0')
+    intf.remove_prefix(pfx.size());
+    auto last = intf.data() + intf.size();
+    unsigned long idx;
+    auto res = std::from_chars(intf.data(), last, idx);
+    if (res.ec != std::errc() || res.ptr != last)
     {
         return std::nullopt;
     }
@@ -478,46 +348,73 @@ std::optional<std::string> interfaceToUbootEthAddr(const char* intf)
     {
         return "ethaddr";
     }
-    return "eth" + std::to_string(idx) + "addr";
+    return fmt::format(FMT_COMPILE("eth{}addr"), idx);
 }
 
-EthernetInterfaceIntf::DHCPConf getDHCPValue(const std::string& confDir,
-                                             const std::string& intf)
+static std::optional<DHCPVal> systemdParseDHCP(std::string_view str)
 {
-    EthernetInterfaceIntf::DHCPConf dhcp =
-        EthernetInterfaceIntf::DHCPConf::none;
-    // Get the interface mode value from systemd conf
-    // using namespace std::string_literals;
-    fs::path confPath = confDir;
-    std::string fileName = systemd::config::networkFilePrefix + intf +
-                           systemd::config::networkFileSuffix;
-    confPath /= fileName;
+    if (config::icaseeq(str, "ipv4"))
+    {
+        return DHCPVal{.v4 = true, .v6 = false};
+    }
+    if (config::icaseeq(str, "ipv6"))
+    {
+        return DHCPVal{.v4 = false, .v6 = true};
+    }
+    if (auto b = config::parseBool(str); b)
+    {
+        return DHCPVal{.v4 = *b, .v6 = *b};
+    }
+    return std::nullopt;
+}
 
-    auto rc = config::ReturnCode::SUCCESS;
-    config::ValueList values;
-    config::Parser parser(confPath.string());
+inline auto systemdParseLast(const config::Parser& config,
+                             std::string_view section, std::string_view key,
+                             auto&& fun)
+{
+    if (auto str = config.map.getLastValueString(section, key); str == nullptr)
+    {
+        auto err = fmt::format("Unable to get the value of {}[{}] from {}",
+                               section, key, config.getFilename().native());
+        log<level::NOTICE>(err.c_str(),
+                           entry("FILE=%s", config.getFilename().c_str()));
+    }
+    else if (auto val = fun(*str); !val)
+    {
+        auto err = fmt::format("Invalid value of {}[{}] from {}: {}", section,
+                               key, config.getFilename().native(), *str);
+        log<level::NOTICE>(err.c_str(), entry("VALUE=%s", str->c_str()),
+                           entry("FILE=%s", config.getFilename().c_str()));
+    }
+    else
+    {
+        return val;
+    }
+    return decltype(fun(std::string_view{}))(std::nullopt);
+}
 
-    std::tie(rc, values) = parser.getValues("Network", "DHCP");
-    if (rc != config::ReturnCode::SUCCESS)
-    {
-        log<level::DEBUG>("Unable to get the value for Network[DHCP]",
-                          entry("RC=%d", rc));
-        return dhcp;
-    }
-    // There will be only single value for DHCP key.
-    if (values[0] == "true")
-    {
-        dhcp = EthernetInterfaceIntf::DHCPConf::both;
-    }
-    else if (values[0] == "ipv4")
-    {
-        dhcp = EthernetInterfaceIntf::DHCPConf::v4;
-    }
-    else if (values[0] == "ipv6")
-    {
-        dhcp = EthernetInterfaceIntf::DHCPConf::v6;
-    }
-    return dhcp;
+bool getIPv6AcceptRA(const config::Parser& config)
+{
+#ifdef ENABLE_IPV6_ACCEPT_RA
+    constexpr bool def = true;
+#else
+    constexpr bool def = false;
+#endif
+    return systemdParseLast(config, "Network", "IPv6AcceptRA",
+                            config::parseBool)
+        .value_or(def);
+}
+
+DHCPVal getDHCPValue(const config::Parser& config)
+{
+    return systemdParseLast(config, "Network", "DHCP", systemdParseDHCP)
+        .value_or(DHCPVal{.v4 = true, .v6 = true});
+}
+
+bool getDHCPProp(const config::Parser& config, std::string_view key)
+{
+    return systemdParseLast(config, "DHCP", key, config::parseBool)
+        .value_or(true);
 }
 
 namespace mac_address
@@ -541,8 +438,7 @@ constexpr auto invNetworkIntf =
     "xyz.openbmc_project.Inventory.Item.NetworkInterface";
 constexpr auto invRoot = "/xyz/openbmc_project/inventory";
 
-ether_addr getfromInventory(sdbusplus::bus::bus& bus,
-                            const std::string& intfName)
+ether_addr getfromInventory(sdbusplus::bus_t& bus, const std::string& intfName)
 {
 
     std::string interfaceName = intfName;
@@ -635,23 +531,22 @@ ether_addr getfromInventory(sdbusplus::bus::bus& bus,
     return fromString(std::get<std::string>(value));
 }
 
-ether_addr fromString(const char* str)
+ether_addr fromString(stdplus::zstring_view str)
 {
     std::string genstr;
 
     // MAC address without colons
-    std::string_view strv = str;
-    if (strv.size() == 12 && strv.find(":") == strv.npos)
+    if (str.size() == 12 && str.find(":") == str.npos)
     {
         genstr =
-            fmt::format(FMT_COMPILE("{}:{}:{}:{}:{}:{}"), strv.substr(0, 2),
-                        strv.substr(2, 2), strv.substr(4, 2), strv.substr(6, 2),
-                        strv.substr(8, 2), strv.substr(10, 2));
-        str = genstr.c_str();
+            fmt::format(FMT_COMPILE("{}:{}:{}:{}:{}:{}"), str.substr(0, 2),
+                        str.substr(2, 2), str.substr(4, 2), str.substr(6, 2),
+                        str.substr(8, 2), str.substr(10, 2));
+        str = genstr;
     }
 
     ether_addr addr;
-    if (ether_aton_r(str, &addr) == nullptr)
+    if (ether_aton_r(str.c_str(), &addr) == nullptr)
     {
         throw std::invalid_argument("Invalid MAC Address");
     }
@@ -660,12 +555,8 @@ ether_addr fromString(const char* str)
 
 std::string toString(const ether_addr& mac)
 {
-    char buf[18] = {0};
-    snprintf(buf, 18, "%02x:%02x:%02x:%02x:%02x:%02x", mac.ether_addr_octet[0],
-             mac.ether_addr_octet[1], mac.ether_addr_octet[2],
-             mac.ether_addr_octet[3], mac.ether_addr_octet[4],
-             mac.ether_addr_octet[5]);
-    return buf;
+    return fmt::format(FMT_COMPILE("{:02x}"),
+                       fmt::join(mac.ether_addr_octet, ":"));
 }
 
 bool isEmpty(const ether_addr& mac)
