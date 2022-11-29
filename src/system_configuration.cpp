@@ -1,4 +1,8 @@
+#include "config.h"
+
 #include "system_configuration.hpp"
+
+#include "network_manager.hpp"
 
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/log.hpp>
@@ -19,16 +23,36 @@ constexpr auto METHOD_SET = "SetStaticHostname";
 
 using namespace phosphor::logging;
 using namespace sdbusplus::xyz::openbmc_project::Common::Error;
+using InvalidArgumentMetadata = xyz::openbmc_project::Common::InvalidArgument;
 
 using SystemConfigIntf =
     sdbusplus::xyz::openbmc_project::Network::server::SystemConfiguration;
 
-SystemConfiguration::SystemConfiguration(sdbusplus::bus_t& bus,
-                                         const std::string& objPath) :
+SystemConfiguration::SystemConfiguration(sdbusplus::bus::bus& bus,
+                                         const std::string& objPath,
+                                         Manager& parent) :
     Iface(bus, objPath.c_str(), Iface::action::defer_emit),
-    bus(bus)
+    bus(bus), manager(parent)
 {
-    SystemConfigIntf::hostName(getHostNameFromSystem());
+    auto name = getHostNameFromSystem();
+
+    SystemConfigIntf::hostName(name);
+    const auto& gatewayList = manager.getRouteTable().getDefaultGateway();
+    const auto& gateway6List = manager.getRouteTable().getDefaultGateway6();
+    // Assign first entry of gateway list
+    std::string gateway;
+    std::string gateway6;
+    if (!gatewayList.empty())
+    {
+        gateway = gatewayList.begin()->second;
+    }
+    if (!gateway6List.empty())
+    {
+        gateway6 = gateway6List.begin()->second;
+    }
+
+    SystemConfigIntf::defaultGateway(gateway);
+    SystemConfigIntf::defaultGateway6(gateway6);
 
     this->emit_object_added();
 }
@@ -70,13 +94,61 @@ std::string SystemConfiguration::getHostNameFromSystem() const
         reply.read(name);
         return std::get<std::string>(name);
     }
-    catch (const sdbusplus::exception_t& ex)
+    catch (const sdbusplus::exception::exception& ex)
     {
         log<level::ERR>(
             "Failed to get the hostname from systemd-hostnamed service",
             entry("ERR=%s", ex.what()));
     }
     return "";
+}
+
+std::string SystemConfiguration::defaultGateway(std::string gateway)
+{
+    auto gw = SystemConfigIntf::defaultGateway();
+    if (gw == gateway)
+    {
+        return gw;
+    }
+
+    if (!isValidIP(AF_INET, gateway))
+    {
+        log<level::ERR>("Not a valid v4 Gateway",
+                        entry("GATEWAY=%s", gateway.c_str()));
+        elog<InvalidArgument>(
+            InvalidArgumentMetadata::ARGUMENT_NAME("GATEWAY"),
+            InvalidArgumentMetadata::ARGUMENT_VALUE(gateway.c_str()));
+    }
+    gw = SystemConfigIntf::defaultGateway(gateway);
+
+    manager.writeToConfigurationFile();
+    manager.reloadConfigs();
+
+    return gw;
+}
+
+std::string SystemConfiguration::defaultGateway6(std::string gateway)
+{
+    auto gw = SystemConfigIntf::defaultGateway6();
+    if (gw == gateway)
+    {
+        return gw;
+    }
+
+    if (!isValidIP(AF_INET6, gateway))
+    {
+        log<level::ERR>("Not a valid v6 Gateway",
+                        entry("GATEWAY=%s", gateway.c_str()));
+        elog<InvalidArgument>(
+            InvalidArgumentMetadata::ARGUMENT_NAME("GATEWAY"),
+            InvalidArgumentMetadata::ARGUMENT_VALUE(gateway.c_str()));
+    }
+    gw = SystemConfigIntf::defaultGateway6(gateway);
+
+    manager.writeToConfigurationFile();
+    manager.reloadConfigs();
+
+    return gw;
 }
 
 } // namespace network

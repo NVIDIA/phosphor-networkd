@@ -29,7 +29,7 @@ namespace details
 {
 
 template <typename T, typename U>
-using ServerObject = typename sdbusplus::server::object_t<T, U>;
+using ServerObject = typename sdbusplus::server::object::object<T, U>;
 
 using VLANCreateIface = details::ServerObject<
     sdbusplus::xyz::openbmc_project::Network::VLAN::server::Create,
@@ -55,7 +55,8 @@ class Manager : public details::VLANCreateIface
      *  @param[in] objPath - Path to attach at.
      *  @param[in] dir - Network Configuration directory path.
      */
-    Manager(sdbusplus::bus_t& bus, const char* objPath, const std::string& dir);
+    Manager(sdbusplus::bus::bus& bus, const char* objPath,
+            const std::string& dir);
 
     ObjectPath vlan(IntfName interfaceName, uint32_t id) override;
 
@@ -80,7 +81,7 @@ class Manager : public details::VLANCreateIface
 
     /** @brief gets the network conf directory.
      */
-    const fs::path& getConfDir() const
+    fs::path getConfDir()
     {
         return confDir;
     }
@@ -102,9 +103,13 @@ class Manager : public details::VLANCreateIface
     }
 
     /** @brief create the default network files for each interface
+     *  @detail if force param is true then forcefully create the network
+     *          files otherwise if network file doesn't exist then
+     *          create it.
+     *  @param[in] force - forcefully create the file
      *  @return true if network file created else false
      */
-    bool createDefaultNetworkFiles();
+    bool createDefaultNetworkFiles(bool force);
 
     /** @brief This function gets the MAC address from the VPD and
      *  sets it on the corresponding ethernet interface during first
@@ -168,7 +173,7 @@ class Manager : public details::VLANCreateIface
 
   protected:
     /** @brief Persistent sdbusplus DBus bus connection. */
-    sdbusplus::bus_t& bus;
+    sdbusplus::bus::bus& bus;
 
     /** @brief Persistent map of EthernetInterface dbus objects and their names
      */

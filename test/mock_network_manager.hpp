@@ -1,7 +1,9 @@
 #pragma once
+
+#include "config.h"
+
 #include "mock_ethernet_interface.hpp"
 #include "network_manager.hpp"
-#include "util.hpp"
 
 #include <gmock/gmock.h>
 
@@ -16,7 +18,7 @@ void refreshObjects();
 class MockManager : public phosphor::network::Manager
 {
   public:
-    MockManager(sdbusplus::bus_t& bus, const char* path,
+    MockManager(sdbusplus::bus::bus& bus, const char* path,
                 const std::string& dir) :
         phosphor::network::Manager(bus, path, dir)
     {
@@ -32,13 +34,13 @@ class MockManager : public phosphor::network::Manager
             fs::path objPath = objectPath;
             // normal ethernet interface
             objPath /= interface;
-            config::Parser config(config::pathForIntfConf(confDir, interface));
+            auto dhcp = getDHCPValue(confDir, interface);
             auto intf =
                 std::make_shared<phosphor::network::MockEthernetInterface>(
-                    bus, objPath.string(), config, *this, true);
+                    bus, objPath.string(), dhcp, *this, true);
             intf->createIPAddressObjects();
             intf->createStaticNeighborObjects();
-            intf->loadNameServers(config);
+            intf->loadNameServers();
             this->interfaces.emplace(
                 std::make_pair(std::move(interface), std::move(intf)));
         }

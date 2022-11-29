@@ -1,5 +1,4 @@
-#include <filesystem>
-#include <string_view>
+#include <string>
 
 namespace phosphor
 {
@@ -8,8 +7,8 @@ namespace network
 
 namespace bmc
 {
-void writeDHCPDefault(const std::filesystem::path& filename,
-                      std::string_view interface);
+void writeDHCPDefault(const std::string& filename,
+                      const std::string& interface);
 }
 
 } // namespace network

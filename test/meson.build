@@ -27,7 +27,6 @@ test_deps = [
   networkd_dep,
   gtest,
   gmock,
-  dependency('stdplus-gtest'),
 ]
 
 test_lib = static_library(
@@ -46,7 +45,6 @@ test_dep = declare_dependency(
 tests = [
   'config_parser',
   'ethernet_interface',
-  'ipaddress',
   'neighbor',
   'netlink',
   'network_manager',
@@ -55,19 +53,6 @@ tests = [
   'vlan_interface',
   'network_monitor'
 ]
-
-run_with_tmp = find_program('run_with_tmp', native: true)
-
-add_test_setup(
-  'networkd',
-  exe_wrapper: run_with_tmp,
-  env: {'TMPTMPL': 'phosphor-networkd-test.XXXXXXXXXX'},
-  is_default: true)
-
-add_test_setup(
-  'valgrind',
-  exe_wrapper: [run_with_tmp, 'valgrind'],
-  env: {'TMPTMPL': 'phosphor-networkd-test.XXXXXXXXXX'})
 
 foreach t : tests
   test(
@@ -78,7 +63,3 @@ foreach t : tests
       implicit_include_directories: false,
       dependencies: test_dep))
 endforeach
-
-if (get_option('hyp-nw-config') == true)
-  subdir('ibm/hypervisor-network-mgr-test')
-endif

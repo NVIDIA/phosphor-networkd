@@ -18,5 +18,4 @@ methods:
           description: >
             The path for the created VLAN object.
       errors:
-        - xyz.openbmc_project.Common.Error.InvalidArgument
         - xyz.openbmc_project.Common.Error.ResourceNotFound

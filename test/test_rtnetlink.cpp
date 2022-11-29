@@ -10,7 +10,6 @@
 #include <functional>
 #include <sdbusplus/bus.hpp>
 #include <sdeventplus/event.hpp>
-#include <testutil.hpp>
 
 #include <gtest/gtest.h>
 
@@ -19,29 +18,46 @@ namespace phosphor
 
 namespace network
 {
-sdbusplus::bus_t bus(sdbusplus::bus::new_default());
+sdbusplus::bus::bus bus(sdbusplus::bus::new_default());
 extern std::unique_ptr<MockManager> manager;
 extern std::unique_ptr<Timer> refreshObjectTimer;
 EventPtr eventPtr = nullptr;
 
-class TestRtNetlink : public TestWithTmp
+class TestRtNetlink : public testing::Test
 {
 
   public:
-    std::optional<rtnetlink::Server> svr;
+    std::string confDir;
+    phosphor::Descriptor smartSock;
 
     TestRtNetlink()
     {
-        manager = std::make_unique<MockManager>(bus, "/xyz/openbmc_test/bcd",
-                                                CaseTmpDir());
+        manager =
+            std::make_unique<MockManager>(bus, "/xyz/openbmc_test/bcd", "/tmp");
         sd_event* events;
         sd_event_default(&events);
         eventPtr.reset(events);
         events = nullptr;
+        setConfDir();
         initializeTimers();
         createNetLinkSocket();
         bus.attach_event(eventPtr.get(), SD_EVENT_PRIORITY_NORMAL);
-        svr.emplace(eventPtr);
+        rtnetlink::Server svr(eventPtr, smartSock);
+    }
+
+    ~TestRtNetlink()
+    {
+        if (confDir.empty())
+        {
+            fs::remove_all(confDir);
+        }
+    }
+
+    void setConfDir()
+    {
+        char tmp[] = "/tmp/NetworkManager.XXXXXX";
+        confDir = mkdtemp(tmp);
+        manager->setConfDir(confDir);
     }
 
     void createNetLinkSocket()
@@ -73,7 +89,7 @@ TEST_F(TestRtNetlink, WithSingleInterface)
 
     EXPECT_EQ(false, manager->hasInterface("igb5"));
     // Send the request
-    send(svr->getSock(), nlMsg, nlMsg->nlmsg_len, 0);
+    send(smartSock(), nlMsg, nlMsg->nlmsg_len, 0);
 
     int i = 3;
     while (i--)

@@ -1,19 +1,18 @@
 #pragma once
-#include "config_parser.hpp"
+
+#include "config.h"
+
+#include "ethernet_interface.hpp"
 #include "types.hpp"
 
 #include <netinet/ether.h>
 #include <unistd.h>
 
 #include <cstring>
-#include <filesystem>
 #include <optional>
 #include <sdbusplus/bus.hpp>
-#include <stdplus/zstring.hpp>
-#include <stdplus/zstring_view.hpp>
 #include <string>
 #include <string_view>
-#include <unordered_set>
 #include <xyz/openbmc_project/Network/EthernetInterface/server.hpp>
 
 namespace phosphor
@@ -27,6 +26,8 @@ using EthernetInterfaceIntf =
 constexpr auto IPV4_MIN_PREFIX_LENGTH = 1;
 constexpr auto IPV4_MAX_PREFIX_LENGTH = 32;
 constexpr auto IPV6_MAX_PREFIX_LENGTH = 128;
+constexpr auto IPV4_PREFIX = "169.254";
+constexpr auto IPV6_PREFIX = "fe80";
 
 namespace mac_address
 {
@@ -35,14 +36,19 @@ namespace mac_address
  *  @param[in] bus - DBUS Bus Object.
  *  @param[in] intfName - Interface name
  */
-ether_addr getfromInventory(sdbusplus::bus_t& bus, const std::string& intfName);
+ether_addr getfromInventory(sdbusplus::bus::bus& bus,
+                            const std::string& intfName);
 
 /** @brief Converts the given mac address into byte form
  *  @param[in] str - The mac address in human readable form
  *  @returns A mac address in network byte order
  *  @throws std::runtime_error for bad mac
  */
-ether_addr fromString(stdplus::zstring_view str);
+ether_addr fromString(const char* str);
+inline ether_addr fromString(const std::string& str)
+{
+    return fromString(str.c_str());
+}
 
 /** @brief Converts the given mac address bytes into a string
  *  @param[in] mac - The mac address
@@ -73,6 +79,13 @@ bool isUnicast(const ether_addr& mac);
 constexpr auto networkdService = "systemd-networkd.service";
 constexpr auto timeSynchdService = "systemd-timesyncd.service";
 
+/* @brief converts the given subnet into prefix notation.
+ * @param[in] addressFamily - IP address family(AF_INET/AF_INET6).
+ * @param[in] mask - Subnet Mask.
+ * @returns prefix.
+ */
+uint8_t toCidr(int addressFamily, const std::string& mask);
+
 /* @brief converts a sockaddr for the specified address family into
  *        a type_safe InAddrAny.
  * @param[in] addressFamily - The address family of the buf
@@ -88,12 +101,25 @@ std::string toString(const InAddrAny& addr);
 std::string toString(const struct in_addr& addr);
 std::string toString(const struct in6_addr& addr);
 
+/* @brief converts the prefix into subnetmask.
+ * @param[in] addressFamily - IP address family(AF_INET/AF_INET6).
+ * @param[in] prefix - prefix length.
+ * @returns subnet mask.
+ */
+std::string toMask(int addressFamily, uint8_t prefix);
+
+/* @brief checks that the given ip address is link local or not.
+ * @param[in] address - IP address.
+ * @returns true if it is linklocal otherwise false.
+ */
+bool isLinkLocalIP(const std::string& address);
+
 /* @brief checks that the given ip address valid or not.
  * @param[in] addressFamily - IP address family(AF_INET/AF_INET6).
  * @param[in] address - IP address.
  * @returns true if it is valid otherwise false.
  */
-bool isValidIP(int addressFamily, stdplus::const_zstring address);
+bool isValidIP(int addressFamily, const std::string& address);
 
 /* @brief checks that the given prefix is valid or not.
  * @param[in] addressFamily - IP address family(AF_INET/AF_INET6).
@@ -101,6 +127,12 @@ bool isValidIP(int addressFamily, stdplus::const_zstring address);
  * @returns true if it is valid otherwise false.
  */
 bool isValidPrefix(int addressFamily, uint8_t prefixLength);
+
+/** @brief Gets the map of interface and the associated
+ *         address.
+ *  @returns map of interface and the address.
+ */
+IntfAddrMap getInterfaceAddrs();
 
 /** @brief Get all the interfaces from the system.
  *  @returns list of interface names.
@@ -110,7 +142,7 @@ InterfaceList getInterfaces();
 /** @brief Delete the given interface.
  *  @param[in] intf - interface name.
  */
-void deleteInterface(stdplus::const_zstring intf);
+void deleteInterface(const std::string& intf);
 
 /** @brief Converts the interface name into a u-boot environment
  *         variable that would hold its ethernet address.
@@ -118,27 +150,14 @@ void deleteInterface(stdplus::const_zstring intf);
  *  @param[in] intf - interface name
  *  @return The name of th environment key
  */
-std::optional<std::string> interfaceToUbootEthAddr(std::string_view intf);
-
-/** @brief read the IPv6AcceptRA value from the configuration file
- *  @param[in] config - The parsed configuration.
- */
-bool getIPv6AcceptRA(const config::Parser& config);
+std::optional<std::string> interfaceToUbootEthAddr(const char* intf);
 
 /** @brief read the DHCP value from the configuration file
- *  @param[in] config - The parsed configuration.
+ *  @param[in] confDir - Network configuration directory.
+ *  @param[in] intf - Interface name.
  */
-struct DHCPVal
-{
-    bool v4, v6;
-};
-DHCPVal getDHCPValue(const config::Parser& config);
-
-/** @brief Read a boolean DHCP property from a conf file
- *  @param[in] config - The parsed configuration.
- *  @param[in] key - The property name.
- */
-bool getDHCPProp(const config::Parser& config, std::string_view key);
+EthernetInterfaceIntf::DHCPConf getDHCPValue(const std::string& confDir,
+                                             const std::string& intf);
 
 namespace internal
 {
@@ -147,17 +166,16 @@ namespace internal
  * @param[in] path - path of the binary file which needs to be execeuted.
  * @param[in] args - arguments of the command.
  */
-void executeCommandinChildProcess(stdplus::const_zstring path, char** args);
+void executeCommandinChildProcess(const char* path, char** args);
 
 /** @brief Get ignored interfaces from environment */
 std::string_view getIgnoredInterfacesEnv();
 
 /** @brief Parse the comma separated interface names */
-std::unordered_set<std::string_view>
-    parseInterfaces(std::string_view interfaces);
+std::set<std::string_view> parseInterfaces(std::string_view interfaces);
 
 /** @brief Get the ignored interfaces */
-const std::unordered_set<std::string_view>& getIgnoredInterfaces();
+const std::set<std::string_view>& getIgnoredInterfaces();
 
 } // namespace internal
 
@@ -166,7 +184,7 @@ const std::unordered_set<std::string_view>& getIgnoredInterfaces();
  * @param[in] tArgs - arguments of the command.
  */
 template <typename... ArgTypes>
-void execute(stdplus::const_zstring path, ArgTypes&&... tArgs)
+void execute(const char* path, ArgTypes&&... tArgs)
 {
     using expandType = char*[];
 
@@ -176,5 +194,57 @@ void execute(stdplus::const_zstring path, ArgTypes&&... tArgs)
 }
 
 } // namespace network
+
+class Descriptor
+{
+  private:
+    /** default value */
+    int fd = -1;
+
+  public:
+    Descriptor() = default;
+    Descriptor(const Descriptor&) = delete;
+    Descriptor& operator=(const Descriptor&) = delete;
+    Descriptor(Descriptor&&) = delete;
+    Descriptor& operator=(Descriptor&&) = delete;
+
+    explicit Descriptor(int fd) : fd(fd)
+    {
+    }
+
+    /* @brief sets the internal file descriptor with the given descriptor
+     *        and closes the old descriptor.
+     * @param[in] descriptor - File/Socket descriptor.
+     */
+    void set(int descriptor)
+    {
+        // same descriptor given
+        if (fd == descriptor)
+        {
+            return;
+        }
+
+        // close the old descriptor
+        if (fd >= 0)
+        {
+            close(fd);
+        }
+
+        fd = descriptor;
+    }
+
+    ~Descriptor()
+    {
+        if (fd >= 0)
+        {
+            close(fd);
+        }
+    }
+
+    int operator()() const
+    {
+        return fd;
+    }
+};
 
 } // namespace phosphor

@@ -2,7 +2,8 @@
 
 #include "network_config.hpp"
 
-#include "config_parser.hpp"
+#include <fstream>
+#include <string>
 
 namespace phosphor
 {
@@ -11,39 +12,33 @@ namespace network
 
 namespace bmc
 {
-void writeDHCPDefault(const std::filesystem::path& filename,
-                      std::string_view interface)
+void writeDHCPDefault(const std::string& filename, const std::string& interface)
 {
-    config::Parser config;
-    config.map["Match"].emplace_back()["Name"].emplace_back(interface);
-    {
-        auto& network = config.map["Network"].emplace_back();
-        network["DHCP"].emplace_back("true");
-        auto& lla = network["LinkLocalAddressing"];
+    std::ofstream filestream;
+
+    filestream.open(filename);
+    // Add the following line to your phosphor-network bbappend file
+    // to control IPV6_ACCEPT_RA
+    //   EXTRA_OECONF_append = " --enable-ipv6-accept-ra=yes"
+    // If this switch is not present or set to 'no'
+    // ENABLE_IPV6_ACCEPT_RA will be undefined.
+    // The new value is only assigned on first boot, when the default
+    // file is not present, or after the default file has been
+    // manually removed.
+    filestream << "[Match]\nName=" << interface <<
+                "\n[Network]\nDHCP=true\n"
 #ifdef LINK_LOCAL_AUTOCONFIGURATION
-        lla.emplace_back("true");
+                "LinkLocalAddressing=yes\n"
 #else
-        lla.emplace_back("false");
+                "LinkLocalAddressing=no\n"
 #endif
-        auto& ra = network["IPv6AcceptRA"];
 #ifdef ENABLE_IPV6_ACCEPT_RA
-        ra.emplace_back("true");
+                "IPv6AcceptRA=true\n"
 #else
-        ra.emplace_back("false");
+                "IPv6AcceptRA=false\n"
 #endif
-    }
-    {
-        auto& dhcp = config.map["DHCP"].emplace_back();
-        dhcp["ClientIdentifier"].emplace_back("mac");
-        dhcp["UseDNS"].emplace_back("true");
-        dhcp["UseDomains"].emplace_back("true");
-        dhcp["UseNTP"].emplace_back("true");
-        dhcp["UseHostname"].emplace_back("true");
-        dhcp["SendHostname"].emplace_back("true");
-    }
-    config.map["IPv6AcceptRA"].emplace_back()["DHCPv6Client"].emplace_back(
-        "true");
-    config.writeFile(filename);
+                "[DHCP]\nClientIdentifier=mac\n";
+    filestream.close();
 }
 } // namespace bmc
 

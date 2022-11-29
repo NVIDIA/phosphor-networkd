@@ -8,9 +8,9 @@
 #include <net/if.h>
 #include <netinet/in.h>
 
+#include <exception>
 #include <filesystem>
 #include <sdbusplus/bus.hpp>
-#include <stdplus/gtest/tmp.hpp>
 
 #include <gtest/gtest.h>
 
@@ -21,32 +21,48 @@ namespace network
 
 namespace fs = std::filesystem;
 
-class TestVlanInterface : public stdplus::gtest::TestWithTmp
+class TestVlanInterface : public testing::Test
 {
   public:
-    sdbusplus::bus_t bus;
-    std::string confDir;
+    sdbusplus::bus::bus bus;
     MockManager manager;
     EthernetInterface interface;
+    std::string confDir;
     TestVlanInterface() :
-        bus(sdbusplus::bus::new_default()), confDir(CaseTmpDir()),
-        manager(bus, "/xyz/openbmc_test/network", confDir),
+        bus(sdbusplus::bus::new_default()),
+        manager(bus, "/xyz/openbmc_test/network", "/tmp"),
         interface(makeInterface(bus, manager))
 
     {
+        setConfDir();
     }
 
-    static EthernetInterface makeInterface(sdbusplus::bus_t& bus,
+    ~TestVlanInterface()
+    {
+        if (confDir != "")
+        {
+            fs::remove_all(confDir);
+        }
+    }
+
+    static EthernetInterface makeInterface(sdbusplus::bus::bus& bus,
                                            MockManager& manager)
     {
         mock_clear();
         mock_addIF("test0", 1);
         return {bus,
                 "/xyz/openbmc_test/network/test0",
-                config::Parser(),
+                EthernetInterface::DHCPConf::none,
                 manager,
                 false,
                 true};
+    }
+
+    void setConfDir()
+    {
+        char tmp[] = "/tmp/VlanInterface.XXXXXX";
+        confDir = mkdtemp(tmp);
+        manager.setConfDir(confDir);
     }
 
     void createVlan(VlanId id)
@@ -93,6 +109,19 @@ class TestVlanInterface : public stdplus::gtest::TestWithTmp
     {
         interface.ip(addressType, ipaddress, subnetMask, gateway);
     }
+
+    bool isValueFound(const std::vector<std::string>& values,
+                      const std::string& expectedValue)
+    {
+        for (const auto& value : values)
+        {
+            if (expectedValue == value)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 TEST_F(TestVlanInterface, createVLAN)
@@ -101,24 +130,39 @@ TEST_F(TestVlanInterface, createVLAN)
     fs::path filePath = confDir;
     filePath /= "test0.50.netdev";
 
-    config::Parser parser(filePath);
-    EXPECT_EQ(parser.map, config::SectionMap(config::SectionMapInt{
-                              {"NetDev",
-                               {
-                                   {{"Name", {"test0.50"}}, {"Kind", {"vlan"}}},
-                               }},
-                              {"VLAN", {{{"Id", {"50"}}}}},
-                          }));
+    config::Parser parser(filePath.string());
+    config::ReturnCode rc = config::ReturnCode::SUCCESS;
+    config::ValueList values;
+
+    std::tie(rc, values) = parser.getValues("NetDev", "Name");
+    std::string expectedValue = "test0.50";
+    bool found = isValueFound(values, expectedValue);
+    EXPECT_EQ(found, true);
+
+    std::tie(rc, values) = parser.getValues("NetDev", "Kind");
+    expectedValue = "vlan";
+    found = isValueFound(values, expectedValue);
+    EXPECT_EQ(found, true);
+
+    std::tie(rc, values) = parser.getValues("VLAN", "Id");
+    expectedValue = "50";
+    found = isValueFound(values, expectedValue);
+    EXPECT_EQ(found, true);
 }
 
 TEST_F(TestVlanInterface, deleteVLAN)
 {
     createVlan(50);
     deleteVlan("test0.50");
+    bool fileFound = false;
 
     fs::path filePath = confDir;
     filePath /= "test0.50.netdev";
-    EXPECT_FALSE(fs::is_regular_file(filePath));
+    if (fs::is_regular_file(filePath.string()))
+    {
+        fileFound = true;
+    }
+    EXPECT_EQ(fileFound, false);
 }
 
 TEST_F(TestVlanInterface, createMultipleVLAN)
@@ -128,25 +172,37 @@ TEST_F(TestVlanInterface, createMultipleVLAN)
 
     fs::path filePath = confDir;
     filePath /= "test0.50.netdev";
-    config::Parser parser(filePath);
-    EXPECT_EQ(parser.map, config::SectionMap(config::SectionMapInt{
-                              {"NetDev",
-                               {
-                                   {{"Name", {"test0.50"}}, {"Kind", {"vlan"}}},
-                               }},
-                              {"VLAN", {{{"Id", {"50"}}}}},
-                          }));
+    config::Parser parser(filePath.string());
+    config::ReturnCode rc = config::ReturnCode::SUCCESS;
+    config::ValueList values;
+
+    std::tie(rc, values) = parser.getValues("NetDev", "Name");
+    std::string expectedValue = "test0.50";
+    bool found = isValueFound(values, expectedValue);
+    EXPECT_EQ(found, true);
+
+    std::tie(rc, values) = parser.getValues("NetDev", "Kind");
+    expectedValue = "vlan";
+    found = isValueFound(values, expectedValue);
+    EXPECT_EQ(found, true);
+
+    std::tie(rc, values) = parser.getValues("VLAN", "Id");
+    expectedValue = "50";
+    found = isValueFound(values, expectedValue);
+    EXPECT_EQ(found, true);
 
     filePath = confDir;
     filePath /= "test0.60.netdev";
-    parser.setFile(filePath);
-    EXPECT_EQ(parser.map, config::SectionMap(config::SectionMapInt{
-                              {"NetDev",
-                               {
-                                   {{"Name", {"test0.60"}}, {"Kind", {"vlan"}}},
-                               }},
-                              {"VLAN", {{{"Id", {"60"}}}}},
-                          }));
+    parser.setFile(filePath.string());
+    std::tie(rc, values) = parser.getValues("NetDev", "Name");
+    expectedValue = "test0.60";
+    found = isValueFound(values, expectedValue);
+    EXPECT_EQ(found, true);
+
+    std::tie(rc, values) = parser.getValues("VLAN", "Id");
+    expectedValue = "60";
+    found = isValueFound(values, expectedValue);
+    EXPECT_EQ(found, true);
 
     deleteVlan("test0.50");
     deleteVlan("test0.60");
