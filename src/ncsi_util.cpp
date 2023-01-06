@@ -397,6 +397,7 @@ int sendOemCommand(int ifindex, int package, int channel,
             std::cout << " " << std::hex << std::setfill('0') << std::setw(2)
                       << (int)i;
         }
+	std::cout.flags( f );
         std::cout << std::endl;
     } 
     return internal::applyCmd(
