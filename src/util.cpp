@@ -338,9 +338,8 @@ IntfAddrMap getInterfaceAddrs()
         if (ifa->ifa_addr->sa_family == AF_INET ||
             ifa->ifa_addr->sa_family == AF_INET6)
         {
-            // if loopback, or not running ignore
-            if ((ifa->ifa_flags & IFF_LOOPBACK) ||
-                !(ifa->ifa_flags & IFF_RUNNING))
+            // if loopback, or not up ignore
+            if ((ifa->ifa_flags & IFF_LOOPBACK) || !(ifa->ifa_flags & IFF_UP))
             {
                 continue;
             }
