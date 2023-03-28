@@ -133,6 +133,9 @@ EthernetInterface::EthernetInterface(sdbusplus::bus::bus& bus,
     EthernetInterfaceIntf::speed(std::get<0>(ifInfo));
 #endif
 
+    optConfigureWithoutCarrier =
+        getOptionFromConf<bool>("Network", "ConfigureWithoutCarrier");
+
     // Emit deferred signal.
     if (emitSignal)
     {
@@ -1008,6 +1011,30 @@ bool EthernetInterface::getIPv6AcceptRAFromConf()
     return (values[0] == "true");
 }
 
+std::optional<std::vector<std::string>>
+    EthernetInterface::getOptionFromConf(const std::string& sectionName,
+                                         const std::string& optionName)
+{
+    fs::path confPath = manager.getConfDir();
+
+    std::string fileName = systemd::config::networkFilePrefix +
+                           interfaceName() + systemd::config::networkFileSuffix;
+    confPath /= fileName;
+    config::ValueList values;
+    config::Parser parser(confPath.string());
+    auto rc = config::ReturnCode::SUCCESS;
+    std::tie(rc, values) = parser.getValues(sectionName, optionName);
+    if (rc != config::ReturnCode::SUCCESS)
+    {
+        log<level::DEBUG>(std::string("Unable to get the value for " +
+                                      sectionName + "[" + optionName + "]")
+                              .c_str(),
+                          entry("rc=%d", rc));
+        return std::nullopt;
+    }
+    return values;
+}
+
 ServerList EthernetInterface::getNTPServersFromConf()
 {
     fs::path confPath = manager.getConfDir();
@@ -1101,6 +1128,13 @@ void EthernetInterface::writeConfigurationFile()
 #endif
     stream << std::boolalpha
            << "IPv6AcceptRA=" << EthernetInterfaceIntf::ipv6AcceptRA() << "\n";
+
+    if (optConfigureWithoutCarrier)
+    {
+        stream << std::boolalpha
+               << "ConfigureWithoutCarrier=" << *optConfigureWithoutCarrier
+               << "\n";
+    }
 
     // Add the VLAN entry
     for (const auto& intf : vlanInterfaces)
