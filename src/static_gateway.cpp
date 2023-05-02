@@ -65,9 +65,11 @@ void StaticGateway::delete_()
             break;
         }
     }
+
     parent.get().writeConfigurationFile();
     parent.get().manager.get().reloadConfigs();
 }
+
 using sdbusplus::xyz::openbmc_project::Common::Error::NotAllowed;
 using REASON =
     phosphor::logging::xyz::openbmc_project::Common::NotAllowed::REASON;

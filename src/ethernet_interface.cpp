@@ -877,8 +877,8 @@ void EthernetInterface::writeConfigurationFile()
         }
     }
 
-    auto path = config::pathForIntfConf(manager.get().getConfDir(),
-                                        interfaceName());
+    auto path =
+        config::pathForIntfConf(manager.get().getConfDir(), interfaceName());
     config.writeFile(path);
     lg2::info("Wrote networkd file: {CFG_FILE}", "CFG_FILE", path);
     writeUpdatedTime(manager, path);
