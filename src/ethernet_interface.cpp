@@ -458,7 +458,6 @@ bool EthernetInterface::nicEnabled(bool value)
             [ifname = interfaceName()]() { system::setNICUp(ifname, false); });
     }
     manager.get().reloadConfigs();
-
     return value;
 }
 
