@@ -20,6 +20,28 @@ executable(
 
 main_deps = []
 main_srcs = []
+
+executable(
+  'ncsi-mctp',
+  'ncsi_mctp_argument.cpp',
+  'ncsi_mctp_main.cpp',
+  'ncsi_mctp_util.cpp',
+  'ncsi_mctp.cpp',
+  'ncsi_instance_id.cpp',
+  implicit_include_directories: false,
+  include_directories: src_includes,
+  dependencies: [
+    fmt_dep,
+    dependency('libnl-3.0'),
+    dependency('libnl-genl-3.0'),
+    phosphor_dbus_interfaces_dep,
+    phosphor_logging_dep,
+  ],
+  install: true,
+  install_dir: get_option('bindir'))
+
+json_dep = declare_dependency()
+
 if get_option('sync-mac')
   main_srcs += [
     'inventory_mac.cpp',
