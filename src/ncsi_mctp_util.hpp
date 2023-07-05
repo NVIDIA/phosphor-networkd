@@ -10,6 +10,7 @@
 #include <map>
 #include <bitset>
 #include <sdbusplus/message/types.hpp>
+#include <nlohmann/json.hpp>
 
 #include "ncsi_mctp.hpp"
 
@@ -23,6 +24,7 @@ namespace network
 namespace ncsi_mctp
 {
 
+using ordered_json = nlohmann::ordered_json;
 constexpr auto DEFAULT_VALUE = -1;
 constexpr auto NONE = 0;
 
