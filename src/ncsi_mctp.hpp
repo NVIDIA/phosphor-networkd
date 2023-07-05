@@ -94,6 +94,11 @@ typedef enum ncsi_requester_log_level {
 #define NCSI_PKT_RSP_R_LENGTH		0x0005 /* Invalid payload length   */
 #define NCSI_PKT_RSP_R_UNKNOWN		0x7fff /* Command type unsupported */
 
+/* OEM Vendor Manufacture ID */
+#define NCSI_OEM_MFR_MLX_ID             0x8119
+#define NCSI_OEM_MFR_BCM_ID             0x113d
+#define NCSI_OEM_MFR_INTEL_ID           0x157
+
 /* NCSI packet header */
 struct ncsi_pkt_hdr {
     uint8_t MCID;
@@ -112,6 +117,19 @@ struct ncsi_rsp_pkt_hdr {
 	uint16_t              code; /* Response code             */
 	uint16_t            reason; /* Response reason           */
 } __attribute__((packed));
+
+/* Structure representing NCSI message */
+struct ncsi_msg {
+	struct ncsi_pkt_hdr hdr; //!< NCSI message header
+	uint8_t payload[1]; //!< &payload[0] is the beginning of the payload
+} __attribute__((packed));
+
+/* OEM Response Packet as per NCSI Specification */
+struct ncsi_rsp_oem_pkt {
+	struct ncsi_rsp_pkt_hdr rsp;         /* Command header    */
+	uint32_t                mfr_id;      /* Manufacture ID    */
+	uint32_t                payload[1];      /* Payload data      */
+}__attribute__((packed));
 
 /**
  * @brief Send a NCSI request message. Wait for corresponding response message,

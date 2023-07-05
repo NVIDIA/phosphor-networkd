@@ -13,6 +13,8 @@
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/log.hpp>
 #include <xyz/openbmc_project/Common/error.hpp>
+#include <unordered_map>
+#include <functional>
 
 namespace phosphor
 {
@@ -238,6 +240,94 @@ ReturnInfo ncsiSendRecv(uint8_t eid,
     return std::make_tuple(NCSI_LOG_INFO, NCSI_REQUESTER_SUCCESS, returnMsg, 0);
 }
 
+/** @brief Display in JSON format.
+ *
+ *  @param[in]  data - data to print in json
+ *
+ *  @return - None
+ */
+static inline void DisplayInJson(const ordered_json& data)
+{
+    std::cout << data.dump(4) << std::endl;
+}
+
+static const std::unordered_map<uint32_t, std::string> oemVendorManufactures =
+{
+    {NCSI_OEM_MFR_MLX_ID, "MLX"},
+    {NCSI_OEM_MFR_BCM_ID, "BCM"},
+    {NCSI_OEM_MFR_INTEL_ID, "INTEL"}
+};
+
+template <typename INT_TYPE>
+static inline std::string to_hex_string(INT_TYPE val)
+{
+    std::stringstream ss;
+    ss << std::hex  << std::setfill('0') << std::setw(sizeof(INT_TYPE)*2) << val;
+    return ss.str();
+}
+
+ordered_json parseOemResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, size_t payloadLength)
+{
+    ordered_json data;
+    ncsi_rsp_oem_pkt* oemResponsePtr = reinterpret_cast<struct ncsi_rsp_oem_pkt*>(responsePtr);
+    payloadLength -= (sizeof(ncsi_rsp_pkt_hdr) - sizeof(ncsi_pkt_hdr));
+
+    auto it = oemVendorManufactures.find(htonl(oemResponsePtr->mfr_id));
+    if (it != oemVendorManufactures.end())
+    {
+        data["Manufacture_ID"] = it->second;
+    }
+    else
+    {
+        data["Manufacture_ID"] = "Unknown Id(0x" + to_hex_string<decltype(oemResponsePtr->mfr_id)>(oemResponsePtr->mfr_id) + ")";
+    }
+
+    payloadLength -= sizeof(oemResponsePtr->mfr_id);
+    int len = payloadLength / sizeof(uint32_t);
+    ordered_json oem_payload = nlohmann::json::array();
+
+    for(int i = 0; i < len; ++i)
+    {
+        oem_payload.push_back("0x" + to_hex_string<uint32_t>(oemResponsePtr->payload[i]));
+    }
+    data["OEM_Payload"] = oem_payload;
+
+    return data;
+}
+
+static const std::unordered_map<uint8_t,std::function<ordered_json(struct ncsi_rsp_pkt_hdr*, size_t)>> handledResponseMsg =
+{
+    {0xD0, parseOemResponseMsg}
+};
+
+void parseResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, ReturnInfo &ncsiInfo,  size_t payloadLength)
+{
+    ordered_json data;
+    auto rc = std::get<1>(ncsiInfo);
+
+    if (rc)
+    {
+        data["Error"]["Code"] = rc;
+        data["Error"]["Message"] = std::get<2>(ncsiInfo);
+        data["Error"]["Data"] = std::get<3>(ncsiInfo);
+        // incase of error in response message print response message
+        if (rc != NCSI_REQUESTER_RESP_MSG_ERROR)
+        {
+            return;
+        }
+    }
+
+    data["Code"] = (int)responsePtr->code;
+    data["Reason"] = (int)responsePtr->reason;
+    auto it = handledResponseMsg.find(responsePtr->common.type);
+    if (it != handledResponseMsg.end())
+    {
+        data.update(it->second(responsePtr, payloadLength));
+    }
+
+    DisplayInJson(data);
+}
+
 ReturnInfo applyCmd(int eid, const Command& cmd, int package = DEFAULT_VALUE,
              int channel = DEFAULT_VALUE, bool verbose = false)
 {
@@ -277,7 +367,8 @@ ReturnInfo applyCmd(int eid, const Command& cmd, int package = DEFAULT_VALUE,
 
     std::vector<uint8_t> responseMsg;
     ncsiInfo = ncsiSendRecv(eid, requestMsg, responseMsg, verbose);
-
+    auto responsePtr = reinterpret_cast<struct ncsi_rsp_pkt_hdr*>(responseMsg.data());
+    parseResponseMsg(responsePtr, ncsiInfo, responseMsg.size() - sizeof(ncsi_pkt_hdr) - sizeof(uint32_t));
     markFree(eid, instanceId);
     return ncsiInfo;
 }
