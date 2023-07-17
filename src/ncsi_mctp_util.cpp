@@ -1,7 +1,6 @@
 #include "ncsi_mctp_util.hpp"
 #include "ncsi_instance_id.hpp"
 
-#include <iomanip>
 #include <fmt/format.h>
 #include <linux/ncsi.h>
 #include <linux/netlink.h>
@@ -52,7 +51,6 @@ void printBuffer(bool verbose, bool isTx, const std::vector<uint8_t>& buffer)
 uint8_t getInstanceId(uint8_t eid)
 {
     if (ids.find(eid) == ids.end()) {
-        InstanceId id;
         ids.emplace(eid, InstanceId());
     }
 
@@ -103,7 +101,7 @@ std::tuple<int, int, std::vector<uint8_t>> getMctpSockInfo(uint8_t remoteEID)
     try {
         const Interfaces ifaceList{"xyz.openbmc_project.MCTP.Endpoint"};
         auto getSubTreeResponse = getSubtree(
-            "/xyz/openbmc_project/mctp", 0, ifaceList);
+            "/xyz/openbmc_project/mctp", 0, std::move(ifaceList));
         for (const auto& [objPath, mapperServiceMap] : getSubTreeResponse) {
             for (const auto& [serviceName, interfaces] : mapperServiceMap) {
                 ObjectValueTree objects{};
@@ -183,11 +181,11 @@ ReturnInfo ncsiSendRecv(uint8_t eid,
     logger(verbose, "Success in creating the socket", sockFd);
 
     /* Register socket operations timeouts */
-	if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout,
-		sizeof(timeout)) < 0) {
+    if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
         returnMsg = "Failed to register socket operations timeouts";
         rc = -errno;
         logger(verbose, returnMsg, rc);
+	close(sockFd);
         return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL, returnMsg, rc);
 	}
     logger(verbose, "Success in setting timeout for the socket", sockFd);
@@ -196,7 +194,7 @@ ReturnInfo ncsiSendRecv(uint8_t eid,
     struct sockaddr_un addr;
     addr.sun_family = AF_UNIX;
     memcpy(addr.sun_path, sockAddress.data(), sockAddress.size());
-    rc = connect(sockFd, reinterpret_cast<struct sockaddr*>(&addr),
+    rc = connect(socketFd(), reinterpret_cast<struct sockaddr*>(&addr),
                 sockAddress.size() + sizeof(addr.sun_family));
     if (-1 == rc) {
         returnMsg = "Failed to connect to the socket";
@@ -207,7 +205,7 @@ ReturnInfo ncsiSendRecv(uint8_t eid,
     logger(verbose, "Success in connecting to socket", rc);
 
     auto ncsiType = MCTP_MSG_TYPE_NCSI;
-    rc = write(sockFd, &ncsiType, sizeof(ncsiType));
+    rc = write(socketFd(), &ncsiType, sizeof(ncsiType));
     if (-1 == rc) {
         returnMsg = "Failed to send message type as ncsi to mctp demux daemon";
         rc = -errno;
@@ -272,14 +270,14 @@ ordered_json parseOemResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, size_t pa
     ncsi_rsp_oem_pkt* oemResponsePtr = reinterpret_cast<struct ncsi_rsp_oem_pkt*>(responsePtr);
     payloadLength -= (sizeof(ncsi_rsp_pkt_hdr) - sizeof(ncsi_pkt_hdr));
 
-    auto it = oemVendorManufactures.find(htonl(oemResponsePtr->mfr_id));
+    auto it = oemVendorManufactures.find(ntohl(oemResponsePtr->mfr_id));
     if (it != oemVendorManufactures.end())
     {
         data["Manufacture_ID"] = it->second;
     }
     else
     {
-        data["Manufacture_ID"] = "Unknown Id(0x" + to_hex_string<decltype(oemResponsePtr->mfr_id)>(oemResponsePtr->mfr_id) + ")";
+        data["Manufacture_ID"] = "Unknown Id(0x" + to_hex_string<uint32_t>(htonl(oemResponsePtr->mfr_id)) + ")";
     }
 
     payloadLength -= sizeof(oemResponsePtr->mfr_id);
@@ -313,12 +311,13 @@ void parseResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, ReturnInfo &ncsiInfo
         // incase of error in response message print response message
         if (rc != NCSI_REQUESTER_RESP_MSG_ERROR)
         {
+            DisplayInJson(data);
             return;
         }
     }
 
-    data["Code"] = (int)responsePtr->code;
-    data["Reason"] = (int)responsePtr->reason;
+    data["Code"] = (int)ntohs(responsePtr->code);
+    data["Reason"] = (int)ntohs(responsePtr->reason);
     auto it = handledResponseMsg.find(responsePtr->common.type);
     if (it != handledResponseMsg.end())
     {
@@ -328,8 +327,8 @@ void parseResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, ReturnInfo &ncsiInfo
     DisplayInJson(data);
 }
 
-ReturnInfo applyCmd(int eid, const Command& cmd, int package = DEFAULT_VALUE,
-             int channel = DEFAULT_VALUE, bool verbose = false)
+ReturnInfo applyCmd(int eid, const Command& cmd, std::vector<uint8_t> &responseMsg,
+                      int package = DEFAULT_VALUE, int channel = DEFAULT_VALUE, bool verbose = false)
 {
     ReturnInfo ncsiInfo{};
     std::string returnMsg;
@@ -338,38 +337,43 @@ ReturnInfo applyCmd(int eid, const Command& cmd, int package = DEFAULT_VALUE,
     uint32_t checksumVal = 0;
     uint32_t *pchecksum = nullptr;
 
-    if (cmd.ncsi_cmd == DEFAULT_VALUE) {
-        returnMsg = "Failed to set valid ncsi command";
-        logger(verbose, returnMsg, cmd.ncsi_cmd);
-        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL, returnMsg, cmd.ncsi_cmd);
+    try {
+        if (cmd.ncsi_cmd == DEFAULT_VALUE) {
+            returnMsg = "Failed to set valid ncsi command";
+            logger(verbose, returnMsg, cmd.ncsi_cmd);
+            return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL, returnMsg, cmd.ncsi_cmd);
+        }
+
+        instanceId = getInstanceId(eid);
+        requestLen = sizeof(ncsi_pkt_hdr) + cmd.payload.size() + NCSI_CHECKSUM_LEN;
+        std::vector<uint8_t> requestMsg(requestLen);
+        ncsi_pkt_hdr* hdr = (ncsi_pkt_hdr*)requestMsg.data();
+        std::copy(cmd.payload.begin(), cmd.payload.end(),
+                requestMsg.begin() + sizeof(ncsi_pkt_hdr));
+        hdr->MCID     = 0x0;
+        hdr->revision = NCSI_PKT_REVISION;
+        hdr->reserved = 0x0;
+        hdr->id       = instanceId;
+        hdr->type     = cmd.ncsi_cmd;
+        hdr->length   = htons(cmd.payload.size());
+        if (channel != DEFAULT_VALUE) {
+            hdr->channel = NCSI_TO_CHANNEL(package, channel);
+        }
+        checksumVal = ncsi_calculate_checksum((unsigned char *)hdr,
+                                            sizeof(*hdr) + cmd.payload.size());
+        pchecksum = (uint32_t *)((uint8_t *)hdr + sizeof(struct ncsi_pkt_hdr) +
+                    NLMSG_ALIGN(cmd.payload.size()));
+        *pchecksum = htonl(checksumVal);
+
+        ncsiInfo = ncsiSendRecv(eid, requestMsg, responseMsg, verbose);
+        markFree(eid, instanceId);
+    }
+    catch (const std::exception& e)
+    {
+        std::string returnMsg = std::string("exception: ") + e.what();
+        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_SEND_FAIL, returnMsg, 0);
     }
 
-    instanceId = getInstanceId(eid);
-    requestLen = sizeof(ncsi_pkt_hdr) + cmd.payload.size() + NCSI_CHECKSUM_LEN;
-    std::vector<uint8_t> requestMsg(requestLen);
-    ncsi_pkt_hdr* hdr = (ncsi_pkt_hdr*)requestMsg.data();
-    std::copy(cmd.payload.begin(), cmd.payload.end(),
-              requestMsg.begin() + sizeof(ncsi_pkt_hdr));
-    hdr->MCID     = 0x0;
-    hdr->revision = NCSI_PKT_REVISION;
-    hdr->reserved = 0x0;
-    hdr->id       = instanceId;
-    hdr->type     = cmd.ncsi_cmd;
-    hdr->length   = htons(cmd.payload.size());
-    if (channel != DEFAULT_VALUE) {
-        hdr->channel = NCSI_TO_CHANNEL(package, channel);
-    }
-	checksumVal = ncsi_calculate_checksum((unsigned char *)hdr,
-					                       sizeof(*hdr) + cmd.payload.size());
-    pchecksum = (uint32_t *)((uint8_t *)hdr + sizeof(struct ncsi_pkt_hdr) +
-		        NLMSG_ALIGN(cmd.payload.size()));
-    *pchecksum = htonl(checksumVal);
-
-    std::vector<uint8_t> responseMsg;
-    ncsiInfo = ncsiSendRecv(eid, requestMsg, responseMsg, verbose);
-    auto responsePtr = reinterpret_cast<struct ncsi_rsp_pkt_hdr*>(responseMsg.data());
-    parseResponseMsg(responsePtr, ncsiInfo, responseMsg.size() - sizeof(ncsi_pkt_hdr) - sizeof(uint32_t));
-    markFree(eid, instanceId);
     return ncsiInfo;
 }
 
@@ -377,6 +381,8 @@ int sendCommand(int eid, int package, int channel, int cmd,
                    std::span<const unsigned char> payload, bool verbose)
 {
     ReturnInfo ncsiInfo{};
+    std::vector<uint8_t> responseMsg{};
+    struct ncsi_rsp_pkt_hdr* responsePtr = nullptr;
 
     if (verbose) {
         std::ios_base::fmtflags f( std::cout.flags() );
@@ -396,9 +402,10 @@ int sendCommand(int eid, int package, int channel, int cmd,
         }
     }
 
-    ncsiInfo = applyCmd(eid,
-                    Command(NcsiMctpCommands::NCSI_CMD_SEND_RAW_CMD, cmd, payload),
-                    package, channel, verbose);
+    ncsiInfo = applyCmd(eid, Command(NcsiMctpCommands::NCSI_CMD_SEND_RAW_CMD, cmd, payload), responseMsg,
+                        package, channel, verbose);
+    responsePtr = reinterpret_cast<struct ncsi_rsp_pkt_hdr*>(responseMsg.data());
+    parseResponseMsg(responsePtr, ncsiInfo, responseMsg.size() - sizeof(ncsi_pkt_hdr) - sizeof(uint32_t));
     return std::get<1>(ncsiInfo);
 }
 

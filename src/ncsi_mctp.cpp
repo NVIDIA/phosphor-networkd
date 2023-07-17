@@ -10,6 +10,7 @@
 #include <linux/ncsi.h>
 #include <time.h>
 
+#include <memory>
 /**
  * @brief Read MCTP socket. If there's data available, return success only if
  *        data is a NCSI message.
@@ -40,18 +41,17 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 		}
 	} else if (length < min_len) {
 		/* read and discard */
-		uint8_t *buf = new uint8_t[length];
-		(void)recv(mctp_fd, buf, length, 0);
-		delete[] buf;
+		std::unique_ptr<uint8_t> buf = std::make_unique<uint8_t>(length);
+		(void)recv(mctp_fd, buf.get(), length, 0);
 		return NCSI_REQUESTER_INVALID_RECV_LEN;
 	} else {
 		struct iovec iov[2];
 		size_t mctp_prefix_len =
 		    sizeof(eid) + sizeof(MCTP_MSG_TYPE_NCSI);
-		uint8_t *mctp_prefix = new uint8_t[mctp_prefix_len];
+		std::unique_ptr<uint8_t> mctp_prefix = std::make_unique<uint8_t>(mctp_prefix_len);
 		size_t ncsi_len = length - mctp_prefix_len;
 		iov[0].iov_len = mctp_prefix_len;
-		iov[0].iov_base = mctp_prefix;
+		iov[0].iov_base = mctp_prefix.get();
 		*ncsi_resp_msg = (uint8_t *)malloc(ncsi_len);
 		iov[1].iov_len = ncsi_len;
 		iov[1].iov_base = *ncsi_resp_msg;
@@ -60,15 +60,12 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 		msg.msg_iovlen = sizeof(iov) / sizeof(iov[0]);
 		ssize_t bytes = recvmsg(mctp_fd, &msg, 0);
 		if (length != bytes) {
-			delete[] mctp_prefix;
 			return NCSI_REQUESTER_INVALID_RECV_LEN;
 		}
-		if ((mctp_prefix[0] != eid) ||
-		    (mctp_prefix[1] != MCTP_MSG_TYPE_NCSI)) {
-			delete[] mctp_prefix;
+		if ((mctp_prefix.get()[0] != eid) ||
+		    (mctp_prefix.get()[1] != MCTP_MSG_TYPE_NCSI)) {
 			return NCSI_REQUESTER_NOT_NCSI_MSG;
 		}
-		delete[] mctp_prefix;
 		*resp_msg_len = ncsi_len;
 		return NCSI_REQUESTER_SUCCESS;
 	}
