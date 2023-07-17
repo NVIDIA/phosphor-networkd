@@ -47,6 +47,12 @@ using PropertyMap = std::map<Property, Value>;
 using InterfaceMap = std::map<Interface, PropertyMap>;
 using ObjectValueTree = std::map<sdbusplus::message::object_path, InterfaceMap>;
 
+/**
+ * @ncsi_requester_log_level_t: Requester Log level.
+ * @ncsi_requester_rc_t: Requester error code.
+ * @ReturnMsg: Explanation for the error code.
+ * @ReturnData: Additional data to analyse.
+ */
 using ReturnMsg = std::string;
 using ReturnData = int;
 using ReturnInfo = std::tuple<ncsi_requester_log_level_t, ncsi_requester_rc_t, ReturnMsg, ReturnData>;
