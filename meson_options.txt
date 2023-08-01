@@ -13,3 +13,5 @@ option('sync-mac', type: 'boolean',
 option('hyp-nw-config', type : 'boolean',
        description : 'ibm-oem: Enable the hypervisor network manager',
        value : 'false')
+option('static-if-list', type : 'string', value : '', 
+       description : 'List of interfaces to exclude from default configuration')
