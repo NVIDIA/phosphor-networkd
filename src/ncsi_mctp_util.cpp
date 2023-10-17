@@ -223,10 +223,12 @@ ReturnInfo ncsiSendRecv(uint8_t eid,
     ret = ncsi_send_recv(eid, sockFd, requestMsg.data() + 2,
                     requestMsg.size() - 2, &responseMessage,
                     &responseMessageSize);
-    responseMsg.resize(responseMessageSize);
-    memcpy(responseMsg.data(), responseMessage, responseMsg.size());
-    free(responseMessage);
-    printBuffer(verbose, false, responseMsg);
+    if (responseMessageSize > 0) {
+        responseMsg.resize(responseMessageSize);
+        memcpy(responseMsg.data(), responseMessage, responseMsg.size());
+        printBuffer(verbose, false, responseMsg);
+        free(responseMessage);
+    }
     if (ret < 0) {
         returnMsg = "Failed to send and receive ncsi messages";
         rc = -errno;

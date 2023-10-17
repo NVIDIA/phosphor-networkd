@@ -43,7 +43,7 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 		/* read and discard */
 		std::unique_ptr<uint8_t> buf = std::make_unique<uint8_t>(length);
 		(void)recv(mctp_fd, buf.get(), length, 0);
-		return NCSI_REQUESTER_INVALID_RECV_LEN;
+		return NCSI_REQUESTER_RESP_MSG_TOO_SMALL;
 	} else {
 		struct iovec iov[2];
 		size_t mctp_prefix_len =
@@ -59,6 +59,7 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 		msg.msg_iov = iov;
 		msg.msg_iovlen = sizeof(iov) / sizeof(iov[0]);
 		ssize_t bytes = recvmsg(mctp_fd, &msg, 0);
+		*resp_msg_len = ncsi_len;
 		if (length != bytes) {
 			return NCSI_REQUESTER_INVALID_RECV_LEN;
 		}
@@ -66,7 +67,6 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 		    (mctp_prefix.get()[1] != MCTP_MSG_TYPE_NCSI)) {
 			return NCSI_REQUESTER_NOT_NCSI_MSG;
 		}
-		*resp_msg_len = ncsi_len;
 		return NCSI_REQUESTER_SUCCESS;
 	}
 }
@@ -88,7 +88,7 @@ ncsi_requester_rc_t ncsi_recv_any(mctp_eid_t eid, int mctp_fd,
 
 	uint32_t ncsi_rc = 0;
 	if (*resp_msg_len < (sizeof(struct ncsi_pkt_hdr) + sizeof(ncsi_rc))) {
-		return NCSI_REQUESTER_RESP_MSG_TOO_SMALL;
+		return NCSI_REQUESTER_INVALID_RECV_LEN;
 	}
 
 	return NCSI_REQUESTER_SUCCESS;
@@ -131,10 +131,10 @@ ncsi_requester_rc_t ncsi_send_recv(mctp_eid_t eid, int mctp_fd,
 	while (1) {
 		rc = ncsi_recv(eid, mctp_fd, hdr->id, ncsi_resp_msg,
 			       resp_msg_len);
- 		if (rc == NCSI_REQUESTER_SUCCESS ||
-		    rc == NCSI_REQUESTER_RESP_MSG_ERROR ||
-			rc == NCSI_REQUESTER_RESP_MSG_TOO_SMALL ||
-			rc == NCSI_REQUESTER_INSTANCE_ID_MISMATCH) {
+		/* If valid data received, break the loop and return the message */
+		if (rc != NCSI_REQUESTER_RECV_TIMEOUT &&
+			rc != NCSI_REQUESTER_RECV_FAIL &&
+			rc != NCSI_REQUESTER_RESP_MSG_TOO_SMALL) {
 			break;
 		}
 		clock_gettime(CLOCK_MONOTONIC , &now);
@@ -142,8 +142,6 @@ ncsi_requester_rc_t ncsi_send_recv(mctp_eid_t eid, int mctp_fd,
 		    (retry_count == MCTP_CMD_THRESHOLD)) {
 			break;
 		}
-		/* free the msg and will read it again */
-		free(*ncsi_resp_msg);
 		/* Increment the retry count */
 		retry_count++;
 	}

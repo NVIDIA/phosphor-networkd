@@ -25,6 +25,7 @@ int main(int argc, char** argv)
     int packageInt{};
     int channelInt{};
     int cmdInt{};
+    int ret = 0;
     bool verbose = false;
     std::vector<unsigned char> payload{};
 
@@ -122,8 +123,16 @@ int main(int argc, char** argv)
         }
     }
 
-    return ncsi_mctp::sendCommand(
-            eidInt, packageInt, channelInt, cmdInt,
-            std::span<const unsigned char>(payload.begin(), payload.end()),
-            verbose);
+    try {
+        ret = ncsi_mctp::sendCommand(
+                eidInt, packageInt, channelInt, cmdInt,
+                std::span<const unsigned char>(payload.begin(), payload.end()),
+                verbose);
+    }
+    catch (const std::exception& e) {
+        exitWithError("exception happened when sending ncsi command",
+                      argv);
+    }
+
+    return ret;
 }
