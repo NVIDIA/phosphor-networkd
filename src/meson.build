@@ -21,6 +21,11 @@ executable(
 main_deps = []
 main_srcs = []
 
+phosphor_logging_dep = dependency(
+  'phosphor-logging',
+  fallback: ['phosphor-logging', 'phosphor_logging_dep'])
+
+
 executable(
   'ncsi-mctp',
   'ncsi_mctp_argument.cpp',
@@ -31,7 +36,6 @@ executable(
   implicit_include_directories: false,
   include_directories: src_includes,
   dependencies: [
-    fmt_dep,
     dependency('libnl-3.0'),
     dependency('libnl-genl-3.0'),
     phosphor_dbus_interfaces_dep,

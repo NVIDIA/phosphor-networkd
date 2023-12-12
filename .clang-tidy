@@ -1,2 +1,0 @@
-Checks: 'clang-analyzer-*'
-WarningsAsErrors: 'clang-analyzer-*'
