@@ -7,8 +7,11 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
+#include <libmctp-externals.h>
 
 constexpr uint8_t MCTP_MSG_TYPE_NCSI = 2;
+constexpr uint8_t MCTP_MSG_TAG_REQ = LIBMCTP_TAG_OWNER_MASK | MCTP_TAG_NCSI;
+constexpr uint8_t MCTP_MSG_TAG_RSP = MCTP_TAG_NCSI;
 
 typedef uint8_t mctp_eid_t;
 

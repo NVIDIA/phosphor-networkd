@@ -30,7 +30,8 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 				     uint8_t **ncsi_resp_msg,
 				     size_t *resp_msg_len)
 {
-	ssize_t min_len = sizeof(eid) + sizeof(MCTP_MSG_TYPE_NCSI) +
+	uint8_t msgTag = 0;
+	ssize_t min_len = sizeof(msgTag) + sizeof(eid) + sizeof(MCTP_MSG_TYPE_NCSI) +
 			  sizeof(struct ncsi_pkt_hdr);
 	ssize_t length = recv(mctp_fd, NULL, 0, MSG_PEEK | MSG_TRUNC);
 	if (length <= 0) {
@@ -47,7 +48,7 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 	} else {
 		struct iovec iov[2];
 		size_t mctp_prefix_len =
-		    sizeof(eid) + sizeof(MCTP_MSG_TYPE_NCSI);
+		    sizeof(msgTag) + sizeof(eid) + sizeof(MCTP_MSG_TYPE_NCSI);
 		std::unique_ptr<uint8_t> mctp_prefix = std::make_unique<uint8_t>(mctp_prefix_len);
 		size_t ncsi_len = length - mctp_prefix_len;
 		iov[0].iov_len = mctp_prefix_len;
@@ -63,8 +64,9 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 		if (length != bytes) {
 			return NCSI_REQUESTER_INVALID_RECV_LEN;
 		}
-		if ((mctp_prefix.get()[0] != eid) ||
-		    (mctp_prefix.get()[1] != MCTP_MSG_TYPE_NCSI)) {
+		if ((mctp_prefix.get()[0] != MCTP_MSG_TAG_RSP) ||
+		    (mctp_prefix.get()[1] != eid) ||
+		    (mctp_prefix.get()[2] != MCTP_MSG_TYPE_NCSI)) {
 			return NCSI_REQUESTER_NOT_NCSI_MSG;
 		}
 		return NCSI_REQUESTER_SUCCESS;
@@ -152,7 +154,7 @@ ncsi_requester_rc_t ncsi_send_recv(mctp_eid_t eid, int mctp_fd,
 ncsi_requester_rc_t ncsi_send(mctp_eid_t eid, int mctp_fd,
 			      const uint8_t *ncsi_req_msg, size_t req_msg_len)
 {
-	uint8_t hdr[2] = {eid, MCTP_MSG_TYPE_NCSI};
+	uint8_t hdr[3] = {MCTP_MSG_TAG_REQ, eid, MCTP_MSG_TYPE_NCSI};
 
 	struct iovec iov[2];
 	iov[0].iov_base = hdr;
