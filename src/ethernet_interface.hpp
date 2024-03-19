@@ -222,6 +222,52 @@ class EthernetInterface : public Ifaces
      */
     virtual ServerList getNameServerFromResolvd() const;
 
+    /** @brief get a optioin from the network configuration file
+     *
+     */
+    std::optional<std::vector<std::string>>
+        getOptionFromConf(const std::string& sectionName,
+                          const std::string& optionName);
+
+    /** @brief get a optioin from the network configuration file and transfer it
+     *         to TYPE
+     */
+    template <typename TYPE>
+    std::optional<TYPE> getOptionFromConf(const std::string& sectionName,
+                                          const std::string& optionName)
+    {
+        auto optValues = getOptionFromConf(sectionName, optionName);
+        if (!optValues)
+        {
+            return std::nullopt;
+        }
+        auto& values = *optValues;
+
+        if constexpr (std::is_same_v<TYPE, bool>)
+        {
+            if (values[0] == "true" || values[0] == "yes")
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else if constexpr (std::is_same_v<TYPE, std::string>)
+        {
+            return values[0];
+        }
+        else if constexpr (std::is_same_v<TYPE, std::vector<std::string>>)
+        {
+            return optValues;
+        }
+        else
+        {
+            return std::nullopt;
+        }
+    }
+
     /** @brief Persistent sdbusplus DBus bus connection. */
     stdplus::PinnedRef<sdbusplus::bus_t> bus;
 
