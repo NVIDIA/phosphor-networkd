@@ -7,7 +7,6 @@
 #include "system_queries.hpp"
 #include "util.hpp"
 
-#include <fcntl.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
 #include <net/if_arp.h>
@@ -15,6 +14,7 @@
 
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/lg2.hpp>
+#include <stdplus/fd/create.hpp>
 #include <stdplus/raw.hpp>
 #include <stdplus/str/cat.hpp>
 #include <stdplus/zstring.hpp>
@@ -118,7 +118,6 @@ EthernetInterface::EthernetInterface(stdplus::PinnedRef<sdbusplus::bus_t> bus,
     {
         EthernetInterface::defaultGateway6(stdplus::toStr(*info.defgw6), true);
     }
-    addDHCPConfigurations();
     emit_object_added();
 
     if (info.intf.vlan_id)
@@ -129,6 +128,8 @@ EthernetInterface::EthernetInterface(stdplus::PinnedRef<sdbusplus::bus_t> bus,
         }
         vlan.emplace(bus, this->objPath.c_str(), info.intf, *this);
     }
+    dhcp4Conf.emplace(bus, this->objPath + "/dhcp4", *this, DHCPType::v4);
+    dhcp6Conf.emplace(bus, this->objPath + "/dhcp6", *this, DHCPType::v6);
     for (const auto& [_, addr] : info.addrs)
     {
         addAddr(addr);
@@ -657,6 +658,42 @@ ServerList EthernetInterface::ntpServers(ServerList /*servers*/)
     elog<NotAllowed>(NotAllowedArgument::REASON("ReadOnly Property"));
 }
 
+static constexpr std::string_view tfStr(bool value)
+{
+    return value ? "true"sv : "false"sv;
+}
+
+static void writeUpdatedTime(const Manager& manager,
+                             const std::filesystem::path& netFile)
+{
+    // JFFS2 doesn't have the time granularity to deal with sub-second
+    // updates. Since we can have multiple file updates within a second
+    // around a reload, we need a location which gives that precision for
+    // future networkd detected reloads. TMPFS gives us this property.
+    if (manager.getConfDir() == "/etc/systemd/network"sv)
+    {
+        auto dir = stdplus::strCat(netFile.native(), ".d");
+        dir.replace(1, 3, "run"); // Replace /etc with /run
+        auto file = dir + "/updated.conf";
+        try
+        {
+            std::filesystem::create_directories(dir);
+            using namespace stdplus::fd;
+            futimens(
+                open(file,
+                     OpenFlags(OpenAccess::WriteOnly).set(OpenFlag::Create),
+                     0644)
+                    .get(),
+                nullptr);
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error("Failed to write time updated file {FILE}: {ERROR}",
+                       "FILE", file, "ERROR", e.what());
+        }
+    }
+}
+
 void EthernetInterface::writeConfigurationFile()
 {
     config::Parser config;
@@ -721,13 +758,14 @@ void EthernetInterface::writeConfigurationFile()
             }
         }
         {
-            auto& gateways = network["Gateway"];
             if (!dhcp4())
             {
-                auto gateway = EthernetInterfaceIntf::defaultGateway();
-                if (!gateway.empty())
+                auto gateway4 = EthernetInterfaceIntf::defaultGateway();
+                if (!gateway4.empty())
                 {
-                    gateways.emplace_back(gateway);
+                    auto& gateway4route = config.map["Route"].emplace_back();
+                    gateway4route["Gateway"].emplace_back(gateway4);
+                    gateway4route["GatewayOnLink"].emplace_back("true");
                 }
             }
 
@@ -736,7 +774,9 @@ void EthernetInterface::writeConfigurationFile()
                 auto gateway6 = EthernetInterfaceIntf::defaultGateway6();
                 if (!gateway6.empty())
                 {
-                    gateways.emplace_back(gateway6);
+                    auto& gateway6route = config.map["Route"].emplace_back();
+                    gateway6route["Gateway"].emplace_back(gateway6);
+                    gateway6route["GatewayOnLink"].emplace_back("true");
                 }
             }
         }
@@ -755,32 +795,27 @@ void EthernetInterface::writeConfigurationFile()
     {
         auto& dhcp4 = config.map["DHCPv4"].emplace_back();
         dhcp4["ClientIdentifier"].emplace_back("mac");
-        const auto& conf = *dhcpConfigs[static_cast<int>(DHCPType::v4)];
-        auto dns_enabled = conf.dnsEnabled() ? "true" : "false";
-        auto domain_enabled = conf.domainEnabled() ? "true" : "false";
-        dhcp4["UseDNS"].emplace_back(dns_enabled);
-        dhcp4["UseDomains"].emplace_back(domain_enabled);
-        dhcp4["UseNTP"].emplace_back(conf.ntpEnabled() ? "true" : "false");
-        dhcp4["UseHostname"].emplace_back(conf.hostNameEnabled() ? "true"
-                                                                 : "false");
+        dhcp4["UseDNS"].emplace_back(tfStr(dhcp4Conf->dnsEnabled()));
+        dhcp4["UseDomains"].emplace_back(tfStr(dhcp4Conf->domainEnabled()));
+        dhcp4["UseNTP"].emplace_back(tfStr(dhcp4Conf->ntpEnabled()));
+        dhcp4["UseHostname"].emplace_back(tfStr(dhcp4Conf->hostNameEnabled()));
         dhcp4["SendHostname"].emplace_back(
-            conf.sendHostNameEnabled() ? "true" : "false");
+            tfStr(dhcp4Conf->sendHostNameEnabled()));
     }
     {
         auto& dhcp6 = config.map["DHCPv6"].emplace_back();
-        const auto& conf = *dhcpConfigs[static_cast<int>(DHCPType::v6)];
-        auto dns_enabled = conf.dnsEnabled() ? "true" : "false";
-        auto domain_enabled = conf.domainEnabled() ? "true" : "false";
-        dhcp6["UseDNS"].emplace_back(dns_enabled);
-        dhcp6["UseDomains"].emplace_back(domain_enabled);
-        dhcp6["UseNTP"].emplace_back(conf.ntpEnabled() ? "true" : "false");
-        dhcp6["UseHostname"].emplace_back(conf.hostNameEnabled() ? "true"
-                                                                 : "false");
+        dhcp6["UseDNS"].emplace_back(tfStr(dhcp6Conf->dnsEnabled()));
+        dhcp6["UseDomains"].emplace_back(tfStr(dhcp6Conf->domainEnabled()));
+        dhcp6["UseNTP"].emplace_back(tfStr(dhcp6Conf->ntpEnabled()));
+        dhcp6["UseHostname"].emplace_back(tfStr(dhcp6Conf->hostNameEnabled()));
+        dhcp6["SendHostname"].emplace_back(
+            tfStr(dhcp6Conf->sendHostNameEnabled()));
     }
     auto path = config::pathForIntfConf(manager.get().getConfDir(),
                                         interfaceName());
     config.writeFile(path);
     lg2::info("Wrote networkd file: {CFG_FILE}", "CFG_FILE", path);
+    writeUpdatedTime(manager, path);
 }
 
 std::string EthernetInterface::macAddress([[maybe_unused]] std::string value)
@@ -817,8 +852,6 @@ std::string EthernetInterface::macAddress([[maybe_unused]] std::string value)
         stdplus::fromStr<stdplus::EtherAddr>(MacAddressIntf::macAddress());
     if (newMAC != oldMAC)
     {
-        auto path = config::pathForIntfConf(manager.get().getConfDir(),
-                                            interface);
         // Update everything that depends on the MAC value
         for (const auto& [_, intf] : manager.get().interfaces)
         {
@@ -830,10 +863,12 @@ std::string EthernetInterface::macAddress([[maybe_unused]] std::string value)
         MacAddressIntf::macAddress(validMAC);
 
         writeConfigurationFile();
-        manager.get().addReloadPreHook([interface, path]() {
+        manager.get().addReloadPreHook([interface, manager = manager]() {
             // The MAC and LLADDRs will only update if the NIC is already down
             system::setNICUp(interface, false);
-            utimensat(AT_FDCWD, path.c_str(), NULL, 0);
+            writeUpdatedTime(
+                manager,
+                config::pathForIntfConf(manager.get().getConfDir(), interface));
         });
         manager.get().reloadConfigs();
     }
@@ -967,14 +1002,6 @@ void EthernetInterface::VlanProperties::delete_()
     }
 
     eth.get().manager.get().reloadConfigs();
-}
-
-void EthernetInterface::addDHCPConfigurations()
-{
-    this->dhcpConfigs.emplace_back(std::make_unique<dhcp::Configuration>(
-        bus, objPath + "/dhcp4", *this, DHCPType::v4));
-    this->dhcpConfigs.emplace_back(std::make_unique<dhcp::Configuration>(
-        bus, objPath + "/dhcp6", *this, DHCPType::v6));
 }
 
 void EthernetInterface::reloadConfigs()
