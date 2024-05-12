@@ -801,9 +801,12 @@ void EthernetInterface::writeConfigurationFile()
         dhcp4["UseHostname"].emplace_back(tfStr(dhcp4Conf->hostNameEnabled()));
         dhcp4["SendHostname"].emplace_back(
             tfStr(dhcp4Conf->sendHostNameEnabled()));
+	dhcp4["VendorClassIdentifier"].emplace_back(VENDOR_CLASS_ID);
+	dhcp4["DUIDType"].emplace_back("link-layer");
     }
     {
         auto& dhcp6 = config.map["DHCPv6"].emplace_back();
+	dhcp6["VendorClass"].emplace_back(VENDOR_CLASS_ID);
         dhcp6["UseDNS"].emplace_back(tfStr(dhcp6Conf->dnsEnabled()));
         dhcp6["UseDomains"].emplace_back(tfStr(dhcp6Conf->domainEnabled()));
         dhcp6["UseNTP"].emplace_back(tfStr(dhcp6Conf->ntpEnabled()));

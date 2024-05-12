@@ -6,6 +6,7 @@ LinkLocalAddressing=@LINK_LOCAL_AUTOCONFIGURATION@
 IPv6AcceptRA=@ENABLE_IPV6_ACCEPT_RA@
 [DHCP]
 ClientIdentifier=mac
+VendorClassIdentifier=@VENDOR_CLASS_ID@
 UseDNS=true
 UseDomains=true
 UseNTP=true
@@ -13,3 +14,5 @@ UseHostname=true
 SendHostname=true
 [IPv6AcceptRA]
 DHCPv6Client=true
+[DHCPv6]
+VendorClass=@VENDOR_CLASS_ID@

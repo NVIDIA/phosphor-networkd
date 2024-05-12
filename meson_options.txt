@@ -17,3 +17,5 @@ option('force-sync-mac', type: 'boolean',
        description: 'Force sync mac address no matter is first boot or not')
 option('static-if-list', type : 'string', value : '', 
        description : 'List of interfaces to exclude from default configuration')
+option('vendor_class_id', type : 'string', value : '',
+       description : 'dhcp vendor class identification to be set the network configuration')
