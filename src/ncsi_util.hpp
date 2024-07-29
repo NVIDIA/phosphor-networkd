@@ -5,10 +5,7 @@
 #include <optional>
 #include <span>
 #include <string>
-<<<<<<< HEAD
 #include <vector>
-=======
->>>>>>> 8a76d89 (ncsi: log interface types using to_string)
 
 namespace phosphor
 {
@@ -100,8 +97,6 @@ struct Interface
 };
 
 std::string to_string(Interface& interface);
-<<<<<<< HEAD
-=======
 
 /* @brief  This function will ask underlying NCSI driver
  *         to send an OEM command (command type 0x50) with
@@ -117,7 +112,6 @@ std::string to_string(Interface& interface);
  */
 int sendOemCommand(Interface& interface, int package, int channel, int opcode,
                    std::span<const unsigned char> payload);
->>>>>>> 8a76d89 (ncsi: log interface types using to_string)
 
 struct NetlinkInterface : Interface
 {

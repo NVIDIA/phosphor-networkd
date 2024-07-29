@@ -157,6 +157,7 @@ int main(int argc, char** argv)
             exitWithError("Package not specified.", argv);
         }
 
+<<<<<<< HEAD
         std::vector<std::string> args = {
             "ncsi-cmd",
             "-i",
@@ -195,6 +196,11 @@ int main(int argc, char** argv)
         }
         delete[] argv;
         return EXIT_FAILURE;
+=======
+        return interface.sendOemCommand(
+            packageInt, channelInt, operationInt,
+            std::span<const unsigned char>(payload.begin(), payload.end()));
+>>>>>>> bc22f81 (ncsi: move ncsi operations to Interface class)
     }
     else if ((options)["set"] == "true")
     {
@@ -207,12 +213,16 @@ int main(int argc, char** argv)
     }
     else if ((options)["info"] == "true")
     {
+<<<<<<< HEAD
         auto info = interface.getInfo(packageInt);
         if (!info)
         {
             return EXIT_FAILURE;
         }
         printInfo(*info);
+=======
+        return interface.getInfo(packageInt);
+>>>>>>> bc22f81 (ncsi: move ncsi operations to Interface class)
     }
     else if ((options)["clear"] == "true")
     {
