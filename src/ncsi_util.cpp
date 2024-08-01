@@ -227,7 +227,7 @@ struct sendCallBackContext
     NCSIResponse resp;
 };
 
-CallBack sendCallBack = [](struct nl_msg* msg, void* arg) {
+CallBack sendCallBack = [](struct nl_msg* msg, void*) {
     using namespace phosphor::network::ncsi;
     auto nlh = nlmsg_hdr(msg);
     struct nlattr* tb[NCSI_ATTR_MAX + 1] = {nullptr};
