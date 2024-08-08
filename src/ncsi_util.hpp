@@ -70,6 +70,29 @@ struct NCSIResponse
     int parseFullPayload();
 };
 
+struct ChannelInfo
+{
+    uint32_t id;
+    bool active;
+    bool forced;
+    uint32_t version_major, version_minor;
+    std::string version;
+    uint32_t link_state;
+    std::vector<uint16_t> vlan_ids;
+};
+
+struct PackageInfo
+{
+    uint32_t id;
+    bool forced;
+    std::vector<ChannelInfo> channels;
+};
+
+struct InterfaceInfo
+{
+    std::vector<PackageInfo> packages;
+};
+
 struct Interface
 {
     /* @brief  This function will ask underlying NCSI driver
