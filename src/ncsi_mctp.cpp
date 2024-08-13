@@ -64,11 +64,18 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 		if (length != bytes) {
 			return NCSI_REQUESTER_INVALID_RECV_LEN;
 		}
-		if ((mctp_prefix.get()[0] != MCTP_MSG_TAG_RSP) ||
-		    (mctp_prefix.get()[1] != eid) ||
+
+		if ((mctp_prefix.get()[1] != eid) ||
 		    (mctp_prefix.get()[2] != MCTP_MSG_TYPE_NCSI)) {
 			return NCSI_REQUESTER_NOT_NCSI_MSG;
 		}
+
+		if (mctp_prefix.get()[0] != MCTP_MSG_TAG_RSP)
+		{
+			/* Unexpected message tag, AEN packet received. */
+			return NCSI_REQUESTER_NOT_NCSI_RESPONSE;
+		}
+
 		return NCSI_REQUESTER_SUCCESS;
 	}
 }
@@ -76,8 +83,15 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
 ncsi_requester_rc_t ncsi_recv_any(mctp_eid_t eid, int mctp_fd,
 				  uint8_t **ncsi_resp_msg, size_t *resp_msg_len)
 {
-	ncsi_requester_rc_t rc =
-	    mctp_recv(eid, mctp_fd, ncsi_resp_msg, resp_msg_len);
+	ncsi_requester_rc_t rc = NCSI_REQUESTER_NOT_NCSI_RESPONSE;
+	int retries = 10;
+
+	while (rc == NCSI_REQUESTER_NOT_NCSI_RESPONSE && retries-- > 0)
+	{
+		/* Read next NCSI packet in case that msg-tag field is unexpected. */
+		rc = mctp_recv(eid, mctp_fd, ncsi_resp_msg, resp_msg_len);
+	}
+
 	if (rc != NCSI_REQUESTER_SUCCESS) {
 		return rc;
 	}

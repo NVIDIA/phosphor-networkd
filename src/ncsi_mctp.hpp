@@ -26,6 +26,7 @@ typedef enum ncsi_requester_error_codes {
 	NCSI_REQUESTER_SEND_FAIL = -7,
 	NCSI_REQUESTER_RECV_FAIL = -8,
 	NCSI_REQUESTER_INVALID_RECV_LEN = -9,
+	NCSI_REQUESTER_NOT_NCSI_RESPONSE = -10
 } ncsi_requester_rc_t;
 
 typedef enum ncsi_requester_log_level {
