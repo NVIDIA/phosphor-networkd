@@ -77,6 +77,26 @@ static void printInfo(phosphor::network::ncsi::InterfaceInfo& info)
     }
 }
 
+static stdplus::StrBuf toHexStr(std::span<const uint8_t> c) noexcept
+{
+    stdplus::StrBuf ret;
+    if (c.empty())
+    {
+        return ret;
+    }
+    stdplus::IntToStr<16, uint8_t> its;
+    auto oit = ret.append(c.size() * 3);
+    auto cit = c.begin();
+    oit = its(oit, *cit++, 2);
+    for (; cit != c.end(); ++cit)
+    {
+        *oit++ = ' ';
+        oit = its(oit, *cit, 2);
+    }
+    *oit = 0;
+    return ret;
+}
+
 int main(int argc, char** argv)
 {
     using namespace phosphor::network;

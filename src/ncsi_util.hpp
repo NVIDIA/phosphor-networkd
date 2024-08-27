@@ -95,6 +95,8 @@ struct InterfaceInfo
 
 struct Interface
 {
+    using ncsiMessage = std::span<const unsigned char>;
+
     /* @brief  This function will ask underlying NCSI driver
      *         to send an OEM command (command type 0x50) with
      *         the specified payload as the OEM data.
