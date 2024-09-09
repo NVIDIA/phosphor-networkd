@@ -1,11 +1,11 @@
 #pragma once
 
+#include <sdbusplus/bus.hpp>
+#include <sdbusplus/bus/match.hpp>
+
 #include <memory>
 #include <string>
 #include <variant>
-
-#include <sdbusplus/bus.hpp>
-#include <sdbusplus/bus/match.hpp>
 
 namespace phosphor
 {
@@ -15,7 +15,7 @@ namespace network
 using propertyMapType = std::map<std::string, std::variant<std::string>>;
 
 /** @class NetworkMonitor
- *  @brief Class implements the APIs required to fire network online target 
+ *  @brief Class implements the APIs required to fire network online target
  *         based on properties observed on systemd networkd interface.
  */
 class NetworkMonitor
@@ -33,38 +33,38 @@ class NetworkMonitor
      */
     NetworkMonitor(sdbusplus::bus::bus& bus);
 
-  private:  
+  private:
     /** @brief manages single registration for network interface
-     *         property change 
-     */    
+     *         property change
+     */
     void registerSignalCallback();
-    
+
     /** @brief Gets network interface properties to determine netwok
-     *         online state   
-     */    
+     *         online state
+     */
     void checkNetworkStatus();
 
-    /** @brief starts or stops the network online target 
+    /** @brief starts or stops the network online target
      *  @param[in] start - bool to start/stop
-     */        
+     */
     void manageNetworkTarget(bool start);
 
-    /** @brief returns network online state  
+    /** @brief returns network online state
      */
     bool getNtOnlineState();
 
     /** @brief Update the internal properties managed by the object
-     *  @param[in] data - list of properties 
-     */    
+     *  @param[in] data - list of properties
+     */
     void updateProperties(propertyMapType data);
-    
-    /** @brief last known network target online state */  
+
+    /** @brief last known network target online state */
     sdbusplus::bus::bus& bus;
-    
-    /** @brief match exp for network interface property interface */  
+
+    /** @brief match exp for network interface property interface */
     std::unique_ptr<sdbusplus::bus::match::match> networkInfMatch;
 
-    /** @brief last known network target online state */  
+    /** @brief last known network target online state */
     bool lastNtOnlineState;
 
     /** @brief network interface address state property */

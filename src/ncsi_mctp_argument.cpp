@@ -57,8 +57,10 @@ void ArgumentParser::usage(char** argv)
     std::cerr << "    --package=<package>      Specify a package.\n";
     std::cerr << "    --channel=<channel>      Specify a channel.\n";
     std::cerr << "    --cmd=<cmd>              Specify a command of NCSI.\n";
-    std::cerr << "    --payload=<hex data>     Specify the payload of NCSI command.\n";
-    std::cerr << "    --verbose                Verbose output to see each packet transfers.\n";
+    std::cerr
+        << "    --payload=<hex data>     Specify the payload of NCSI command.\n";
+    std::cerr
+        << "    --verbose                Verbose output to see each packet transfers.\n";
     std::cerr << std::flush;
 }
 

@@ -1,21 +1,22 @@
 #pragma once
 
-#include <span>
-#include <cstdint>
-#include <string>
-#include <vector>
-#include <iostream>
-#include <variant>
-#include <filesystem>
-#include <map>
-#include <bitset>
-#include <sdbusplus/message/types.hpp>
-#include <nlohmann/json.hpp>
-
 #include "ncsi_mctp.hpp"
 
-#define NCSI_PACKAGE_SHIFT	5
-#define NCSI_TO_CHANNEL(p, c)	(((p) << NCSI_PACKAGE_SHIFT) | (c))
+#include <nlohmann/json.hpp>
+#include <sdbusplus/message/types.hpp>
+
+#include <bitset>
+#include <cstdint>
+#include <filesystem>
+#include <iostream>
+#include <map>
+#include <span>
+#include <string>
+#include <variant>
+#include <vector>
+
+#define NCSI_PACKAGE_SHIFT 5
+#define NCSI_TO_CHANNEL(p, c) (((p) << NCSI_PACKAGE_SHIFT) | (c))
 
 namespace phosphor
 {
@@ -55,7 +56,8 @@ using ObjectValueTree = std::map<sdbusplus::message::object_path, InterfaceMap>;
  */
 using ReturnMsg = std::string;
 using ReturnData = int;
-using ReturnInfo = std::tuple<ncsi_requester_log_level_t, ncsi_requester_rc_t, ReturnMsg, ReturnData>;
+using ReturnInfo = std::tuple<ncsi_requester_log_level_t, ncsi_requester_rc_t,
+                              ReturnMsg, ReturnData>;
 
 /** @struct CustomFD
  *
@@ -68,8 +70,7 @@ struct CustomFD
     CustomFD(CustomFD&&) = delete;
     CustomFD& operator=(CustomFD&&) = delete;
 
-    CustomFD(int fd) : fd(fd)
-    {}
+    CustomFD(int fd) : fd(fd) {}
 
     ~CustomFD()
     {
@@ -102,8 +103,7 @@ class Command
         std::span<const unsigned char> p = std::span<const unsigned char>()) :
         cmd(c),
         ncsi_cmd(nc), payload(p)
-    {
-    }
+    {}
 
     int cmd;
     int ncsi_cmd;
@@ -114,15 +114,17 @@ class Command
  * enum NcsiMctpCommands - specific NCSI commands
  *
  * @NCSI_CMD_UNSPEC: unspecified command to catch errors
- * @NCSI_CMD_SEND_RAW_CMD: specific NC-SI command id and payload to network card.
+ * @NCSI_CMD_SEND_RAW_CMD: specific NC-SI command id and payload to network
+ * card.
  * @NCSI_CMD_MAX: highest command number
  */
-enum NcsiMctpCommands {
-	NCSI_CMD_UNSPEC,
-	NCSI_CMD_SEND_RAW_CMD,
+enum NcsiMctpCommands
+{
+    NCSI_CMD_UNSPEC,
+    NCSI_CMD_SEND_RAW_CMD,
 
-	__NCSI_CMD_AFTER_LAST,
-	NCSI_CMD_MAX = __NCSI_CMD_AFTER_LAST - 1
+    __NCSI_CMD_AFTER_LAST,
+    NCSI_CMD_MAX = __NCSI_CMD_AFTER_LAST - 1
 };
 
 /** @brief Print the buffer if verbose is enabled
@@ -140,10 +142,10 @@ void printBuffer(bool verbose, bool isTx, const std::vector<uint8_t>& buffer);
 uint8_t getInstanceId(uint8_t eid);
 
 /** @brief Mark an instance id as unused
-*  @param[in] eid - MCTP eid to which this instance id belongs
-*  @param[in] instanceId - NCSI instance id to be freed
-*  @note will throw std::out_of_range if instanceId > 255
-*/
+ *  @param[in] eid - MCTP eid to which this instance id belongs
+ *  @param[in] instanceId - NCSI instance id to be freed
+ *  @note will throw std::out_of_range if instanceId > 255
+ */
 void markFree(uint8_t eid, uint8_t instanceId);
 
 /**
@@ -188,7 +190,7 @@ std::tuple<int, int, std::vector<uint8_t>> getMctpSockInfo(uint8_t remoteEID);
  * @returns 0 on success and negative value for failure.
  */
 int sendCommand(int eid, int package, int channel, int cmd,
-                   std::span<const unsigned char> payload, bool verbose);
+                std::span<const unsigned char> payload, bool verbose);
 
 /** @brief print the input message if verbose is enabled
  *
@@ -201,10 +203,12 @@ int sendCommand(int eid, int package, int channel, int cmd,
 template <class T>
 void logger(bool verbose, std::string msg, const T& data)
 {
-    if (verbose) {
+    if (verbose)
+    {
         std::stringstream s;
         s << data;
-        std::cout << "ncsi-mctp: " << msg.c_str() << ", RC = " << s.str() << std::endl;
+        std::cout << "ncsi-mctp: " << msg.c_str() << ", RC = " << s.str()
+                  << std::endl;
     }
 }
 

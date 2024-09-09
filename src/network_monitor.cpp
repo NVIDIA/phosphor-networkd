@@ -26,9 +26,8 @@ NetworkMonitor::NetworkMonitor(sdbusplus::bus::bus& bus) : bus(bus)
 void NetworkMonitor::registerSignalCallback()
 {
     auto callback = [&](sdbusplus::message::message& m) {
-
         log<level::DEBUG>("Netwrok PropertiesChanged callback triggered");
-        
+
         propertyMapType result;
         std::string path;
         m.read(path, result);
@@ -51,11 +50,12 @@ void NetworkMonitor::registerSignalCallback()
         callback);
 }
 
-bool NetworkMonitor::getNtOnlineState() 
+bool NetworkMonitor::getNtOnlineState()
 {
     return (addressState == "routable" &&
             (onlineState == "online" || onlineState == "partial"))
-               ? true : false;
+               ? true
+               : false;
 }
 
 void NetworkMonitor::checkNetworkStatus()
@@ -79,19 +79,19 @@ void NetworkMonitor::checkNetworkStatus()
             response.read(result);
             if (result.empty())
             {
-                log<level::ERR>(
-                    "Error in network1.Manager GetAll method call");
+                log<level::ERR>("Error in network1.Manager GetAll method call");
             }
             else
             {
                 updateProperties(std::move(result));
             }
-        }        
+        }
     }
     catch (const sdbusplus::exception::exception& e)
     {
         log<level::ERR>(
-            fmt::format("Error in network manager property get call: {}", e.what())
+            fmt::format("Error in network manager property get call: {}",
+                        e.what())
                 .c_str());
     }
 }
@@ -140,7 +140,7 @@ void NetworkMonitor::updateProperties(propertyMapType data)
                         addressState, onlineState, lastNtOnlineState)
                 .c_str());
         manageNetworkTarget(lastNtOnlineState);
-    }    
+    }
 }
 
 } // namespace network

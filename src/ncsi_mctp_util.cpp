@@ -1,19 +1,21 @@
 #include "ncsi_mctp_util.hpp"
+
 #include "ncsi_instance_id.hpp"
 
+#include <arpa/inet.h>
 #include <fmt/format.h>
 #include <linux/ncsi.h>
 #include <linux/netlink.h>
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <sys/time.h>
-#include <arpa/inet.h>
+#include <sys/un.h>
 
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/log.hpp>
 #include <xyz/openbmc_project/Common/error.hpp>
-#include <unordered_map>
+
 #include <functional>
+#include <unordered_map>
 
 namespace phosphor
 {
@@ -29,36 +31,39 @@ std::map<uint8_t, InstanceId> ids;
 
 void printBuffer(bool verbose, bool isTx, const std::vector<uint8_t>& buffer)
 {
-    if (!buffer.empty() && verbose) {
+    if (!buffer.empty() && verbose)
+    {
         std::ostringstream tempStream;
-        for (int byte : buffer) {
+        for (int byte : buffer)
+        {
             tempStream << std::setfill('0') << std::setw(2) << std::hex << byte
                        << " ";
         }
-        if (isTx) {
-            std::cout << "ncsi-mctp Tx: "
-                      << tempStream.str()
-                      << "\n";
+        if (isTx)
+        {
+            std::cout << "ncsi-mctp Tx: " << tempStream.str() << "\n";
         }
-        else {
-            std::cout << "ncsi-mctp Rx: "
-                      << tempStream.str()
-                      << "\n";
+        else
+        {
+            std::cout << "ncsi-mctp Rx: " << tempStream.str() << "\n";
         }
     }
 }
 
 uint8_t getInstanceId(uint8_t eid)
 {
-    if (ids.find(eid) == ids.end()) {
+    if (ids.find(eid) == ids.end())
+    {
         ids.emplace(eid, InstanceId());
     }
 
     uint8_t id{};
-    try {
+    try
+    {
         id = ids[eid].next();
     }
-    catch (const std::runtime_error& e) {
+    catch (const std::runtime_error& e)
+    {
         throw TooManyResources();
     }
 
@@ -98,12 +103,15 @@ std::tuple<int, int, std::vector<uint8_t>> getMctpSockInfo(uint8_t remoteEID)
     const auto mctpEndpointIntfName{"xyz.openbmc_project.MCTP.Endpoint"};
     const auto unixSocketIntfName{"xyz.openbmc_project.Common.UnixSocket"};
 
-    try {
+    try
+    {
         const Interfaces ifaceList{"xyz.openbmc_project.MCTP.Endpoint"};
-        auto getSubTreeResponse = getSubtree(
-            "/xyz/openbmc_project/mctp", 0, std::move(ifaceList));
-        for (const auto& [objPath, mapperServiceMap] : getSubTreeResponse) {
-            for (const auto& [serviceName, interfaces] : mapperServiceMap) {
+        auto getSubTreeResponse = getSubtree("/xyz/openbmc_project/mctp", 0,
+                                             std::move(ifaceList));
+        for (const auto& [objPath, mapperServiceMap] : getSubTreeResponse)
+        {
+            for (const auto& [serviceName, interfaces] : mapperServiceMap)
+            {
                 ObjectValueTree objects{};
 
                 auto method = bus.new_method_call(
@@ -111,13 +119,17 @@ std::tuple<int, int, std::vector<uint8_t>> getMctpSockInfo(uint8_t remoteEID)
                     "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
                 auto reply = bus.call(method);
                 reply.read(objects);
-                for (const auto& [objectPath, interfaces] : objects) {
-                    if (interfaces.contains(mctpEndpointIntfName)) {
+                for (const auto& [objectPath, interfaces] : objects)
+                {
+                    if (interfaces.contains(mctpEndpointIntfName))
+                    {
                         const auto& mctpProperties =
                             interfaces.at(mctpEndpointIntfName);
                         auto eid = std::get<size_t>(mctpProperties.at("EID"));
-                        if (remoteEID == eid) {
-                            if (interfaces.contains(unixSocketIntfName)) {
+                        if (remoteEID == eid)
+                        {
+                            if (interfaces.contains(unixSocketIntfName))
+                            {
                                 const auto& properties =
                                     interfaces.at(unixSocketIntfName);
                                 type = std::get<size_t>(properties.at("Type"));
@@ -125,10 +137,13 @@ std::tuple<int, int, std::vector<uint8_t>> getMctpSockInfo(uint8_t remoteEID)
                                     std::get<size_t>(properties.at("Protocol"));
                                 address = std::get<std::vector<uint8_t>>(
                                     properties.at("Address"));
-                                if (address.empty() || !type) {
+                                if (address.empty() || !type)
+                                {
                                     address.clear();
                                     return {0, 0, address};
-                                } else {
+                                }
+                                else
+                                {
                                     return {type, protocol, address};
                                 }
                             }
@@ -147,10 +162,8 @@ std::tuple<int, int, std::vector<uint8_t>> getMctpSockInfo(uint8_t remoteEID)
     return {type, protocol, address};
 }
 
-ReturnInfo ncsiSendRecv(uint8_t eid,
-                        std::vector<uint8_t>& requestMsg,
-                        std::vector<uint8_t>& responseMsg,
-                        bool verbose)
+ReturnInfo ncsiSendRecv(uint8_t eid, std::vector<uint8_t>& requestMsg,
+                        std::vector<uint8_t>& responseMsg, bool verbose)
 {
     std::string returnMsg;
     int rc = 0;
@@ -161,33 +174,40 @@ ReturnInfo ncsiSendRecv(uint8_t eid,
     printBuffer(verbose, true, requestMsg);
 
     auto [type, protocol, sockAddress] = getMctpSockInfo(eid);
-    if (sockAddress.empty()) {
+    if (sockAddress.empty())
+    {
         returnMsg = "Failed to get mctp socket info";
         rc = eid;
         logger(verbose, returnMsg, rc);
-        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL, returnMsg, rc);
+        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL,
+                               returnMsg, rc);
     }
 
     int sockFd = socket(AF_UNIX, type, protocol);
     struct timeval timeout;
-	timeout.tv_sec = MCTP_CTRL_TXRX_TIMEOUT_5SECS;
-	timeout.tv_usec = MCTP_CTRL_TXRX_TIMEOUT_MICRO_SECS;
-    if (-1 == sockFd) {
+    timeout.tv_sec = MCTP_CTRL_TXRX_TIMEOUT_5SECS;
+    timeout.tv_usec = MCTP_CTRL_TXRX_TIMEOUT_MICRO_SECS;
+    if (-1 == sockFd)
+    {
         returnMsg = "Failed to create the socket";
         rc = -errno;
         logger(verbose, returnMsg, rc);
-        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL, returnMsg, rc);
+        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL,
+                               returnMsg, rc);
     }
     logger(verbose, "Success in creating the socket", sockFd);
 
     /* Register socket operations timeouts */
-    if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) {
+    if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout,
+                   sizeof(timeout)) < 0)
+    {
         returnMsg = "Failed to register socket operations timeouts";
         rc = -errno;
         logger(verbose, returnMsg, rc);
-	close(sockFd);
-        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL, returnMsg, rc);
-	}
+        close(sockFd);
+        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL,
+                               returnMsg, rc);
+    }
     logger(verbose, "Success in setting timeout for the socket", sockFd);
 
     CustomFD socketFd(sockFd);
@@ -195,41 +215,45 @@ ReturnInfo ncsiSendRecv(uint8_t eid,
     addr.sun_family = AF_UNIX;
     memcpy(addr.sun_path, sockAddress.data(), sockAddress.size());
     rc = connect(socketFd(), reinterpret_cast<struct sockaddr*>(&addr),
-                sockAddress.size() + sizeof(addr.sun_family));
-    if (-1 == rc) {
+                 sockAddress.size() + sizeof(addr.sun_family));
+    if (-1 == rc)
+    {
         returnMsg = "Failed to connect to the socket";
         rc = -errno;
         logger(verbose, returnMsg, rc);
-        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL, returnMsg, rc);
+        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL,
+                               returnMsg, rc);
     }
     logger(verbose, "Success in connecting to socket", rc);
 
     auto ncsiType = MCTP_MSG_TYPE_NCSI;
     rc = write(socketFd(), &ncsiType, sizeof(ncsiType));
-    if (-1 == rc) {
+    if (-1 == rc)
+    {
         returnMsg = "Failed to send message type as ncsi to mctp demux daemon";
         rc = -errno;
         logger(verbose, returnMsg, rc);
-        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_SEND_FAIL, returnMsg, rc);
+        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_SEND_FAIL,
+                               returnMsg, rc);
     }
-    logger(
-        verbose,
-        "Success in sending message type as ncsi to mctp demux daemon",
-        rc);
+    logger(verbose,
+           "Success in sending message type as ncsi to mctp demux daemon", rc);
 
     uint8_t* responseMessage = nullptr;
     size_t responseMessageSize{};
     ncsi_requester_rc_t ret;
     ret = ncsi_send_recv(eid, sockFd, requestMsg.data() + 2,
-                    requestMsg.size() - 2, &responseMessage,
-                    &responseMessageSize);
-    if (responseMessageSize > 0) {
+                         requestMsg.size() - 2, &responseMessage,
+                         &responseMessageSize);
+    if (responseMessageSize > 0)
+    {
         responseMsg.resize(responseMessageSize);
         memcpy(responseMsg.data(), responseMessage, responseMsg.size());
         printBuffer(verbose, false, responseMsg);
         free(responseMessage);
     }
-    if (ret < 0) {
+    if (ret < 0)
+    {
         returnMsg = "Failed to send and receive ncsi messages";
         rc = -errno;
         logger(verbose, returnMsg, ret);
@@ -251,25 +275,26 @@ static inline void DisplayInJson(const ordered_json& data)
     std::cout << data.dump(4) << std::endl;
 }
 
-static const std::unordered_map<uint32_t, std::string> oemVendorManufactures =
-{
+static const std::unordered_map<uint32_t, std::string> oemVendorManufactures = {
     {NCSI_OEM_MFR_MLX_ID, "MLX"},
     {NCSI_OEM_MFR_BCM_ID, "BCM"},
-    {NCSI_OEM_MFR_INTEL_ID, "INTEL"}
-};
+    {NCSI_OEM_MFR_INTEL_ID, "INTEL"}};
 
 template <typename INT_TYPE>
 static inline std::string to_hex_string(INT_TYPE val)
 {
     std::stringstream ss;
-    ss << std::hex  << std::setfill('0') << std::setw(sizeof(INT_TYPE)*2) << val;
+    ss << std::hex << std::setfill('0') << std::setw(sizeof(INT_TYPE) * 2)
+       << val;
     return ss.str();
 }
 
-ordered_json parseOemResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, size_t payloadLength)
+ordered_json parseOemResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr,
+                                 size_t payloadLength)
 {
     ordered_json data;
-    ncsi_rsp_oem_pkt* oemResponsePtr = reinterpret_cast<struct ncsi_rsp_oem_pkt*>(responsePtr);
+    ncsi_rsp_oem_pkt* oemResponsePtr =
+        reinterpret_cast<struct ncsi_rsp_oem_pkt*>(responsePtr);
     payloadLength -= (sizeof(ncsi_rsp_pkt_hdr) - sizeof(ncsi_pkt_hdr));
 
     auto it = oemVendorManufactures.find(ntohl(oemResponsePtr->mfr_id));
@@ -279,28 +304,31 @@ ordered_json parseOemResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, size_t pa
     }
     else
     {
-        data["Manufacture_ID"] = "Unknown Id(0x" + to_hex_string<uint32_t>(htonl(oemResponsePtr->mfr_id)) + ")";
+        data["Manufacture_ID"] =
+            "Unknown Id(0x" +
+            to_hex_string<uint32_t>(htonl(oemResponsePtr->mfr_id)) + ")";
     }
 
     payloadLength -= sizeof(oemResponsePtr->mfr_id);
     int len = payloadLength / sizeof(uint32_t);
     ordered_json oem_payload = nlohmann::json::array();
 
-    for(int i = 0; i < len; ++i)
+    for (int i = 0; i < len; ++i)
     {
-        oem_payload.push_back("0x" + to_hex_string<uint32_t>(oemResponsePtr->payload[i]));
+        oem_payload.push_back(
+            "0x" + to_hex_string<uint32_t>(oemResponsePtr->payload[i]));
     }
     data["OEM_Payload"] = oem_payload;
 
     return data;
 }
 
-static const std::unordered_map<uint8_t,std::function<ordered_json(struct ncsi_rsp_pkt_hdr*, size_t)>> handledResponseMsg =
-{
-    {0xD0, parseOemResponseMsg}
-};
+static const std::unordered_map<
+    uint8_t, std::function<ordered_json(struct ncsi_rsp_pkt_hdr*, size_t)>>
+    handledResponseMsg = {{0xD0, parseOemResponseMsg}};
 
-void parseResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, ReturnInfo &ncsiInfo,  size_t payloadLength)
+void parseResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr,
+                      ReturnInfo& ncsiInfo, size_t payloadLength)
 {
     ordered_json data;
     auto rc = std::get<1>(ncsiInfo);
@@ -329,42 +357,49 @@ void parseResponseMsg(struct ncsi_rsp_pkt_hdr* responsePtr, ReturnInfo &ncsiInfo
     DisplayInJson(data);
 }
 
-ReturnInfo applyCmd(int eid, const Command& cmd, std::vector<uint8_t> &responseMsg,
-                      int package = DEFAULT_VALUE, int channel = DEFAULT_VALUE, bool verbose = false)
+ReturnInfo applyCmd(int eid, const Command& cmd,
+                    std::vector<uint8_t>& responseMsg,
+                    int package = DEFAULT_VALUE, int channel = DEFAULT_VALUE,
+                    bool verbose = false)
 {
     ReturnInfo ncsiInfo{};
     std::string returnMsg;
     int requestLen = 0;
     uint8_t instanceId = 0;
     uint32_t checksumVal = 0;
-    uint32_t *pchecksum = nullptr;
+    uint32_t* pchecksum = nullptr;
 
-    try {
-        if (cmd.ncsi_cmd == DEFAULT_VALUE) {
+    try
+    {
+        if (cmd.ncsi_cmd == DEFAULT_VALUE)
+        {
             returnMsg = "Failed to set valid ncsi command";
             logger(verbose, returnMsg, cmd.ncsi_cmd);
-            return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL, returnMsg, cmd.ncsi_cmd);
+            return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_OPEN_FAIL,
+                                   returnMsg, cmd.ncsi_cmd);
         }
 
         instanceId = getInstanceId(eid);
-        requestLen = sizeof(ncsi_pkt_hdr) + cmd.payload.size() + NCSI_CHECKSUM_LEN;
+        requestLen = sizeof(ncsi_pkt_hdr) + cmd.payload.size() +
+                     NCSI_CHECKSUM_LEN;
         std::vector<uint8_t> requestMsg(requestLen);
         ncsi_pkt_hdr* hdr = (ncsi_pkt_hdr*)requestMsg.data();
         std::copy(cmd.payload.begin(), cmd.payload.end(),
-                requestMsg.begin() + sizeof(ncsi_pkt_hdr));
-        hdr->MCID     = 0x0;
+                  requestMsg.begin() + sizeof(ncsi_pkt_hdr));
+        hdr->MCID = 0x0;
         hdr->revision = NCSI_PKT_REVISION;
         hdr->reserved = 0x0;
-        hdr->id       = instanceId;
-        hdr->type     = cmd.ncsi_cmd;
-        hdr->length   = htons(cmd.payload.size());
-        if (channel != DEFAULT_VALUE) {
+        hdr->id = instanceId;
+        hdr->type = cmd.ncsi_cmd;
+        hdr->length = htons(cmd.payload.size());
+        if (channel != DEFAULT_VALUE)
+        {
             hdr->channel = NCSI_TO_CHANNEL(package, channel);
         }
-        checksumVal = ncsi_calculate_checksum((unsigned char *)hdr,
-                                            sizeof(*hdr) + cmd.payload.size());
-        pchecksum = (uint32_t *)((uint8_t *)hdr + sizeof(struct ncsi_pkt_hdr) +
-                    NLMSG_ALIGN(cmd.payload.size()));
+        checksumVal = ncsi_calculate_checksum(
+            (unsigned char*)hdr, sizeof(*hdr) + cmd.payload.size());
+        pchecksum = (uint32_t*)((uint8_t*)hdr + sizeof(struct ncsi_pkt_hdr) +
+                                NLMSG_ALIGN(cmd.payload.size()));
         *pchecksum = htonl(checksumVal);
 
         ncsiInfo = ncsiSendRecv(eid, requestMsg, responseMsg, verbose);
@@ -373,41 +408,49 @@ ReturnInfo applyCmd(int eid, const Command& cmd, std::vector<uint8_t> &responseM
     catch (const std::exception& e)
     {
         std::string returnMsg = std::string("exception: ") + e.what();
-        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_SEND_FAIL, returnMsg, 0);
+        return std::make_tuple(NCSI_LOG_ERR, NCSI_REQUESTER_SEND_FAIL,
+                               returnMsg, 0);
     }
 
     return ncsiInfo;
 }
 
 int sendCommand(int eid, int package, int channel, int cmd,
-                   std::span<const unsigned char> payload, bool verbose)
+                std::span<const unsigned char> payload, bool verbose)
 {
     ReturnInfo ncsiInfo{};
     std::vector<uint8_t> responseMsg{};
     struct ncsi_rsp_pkt_hdr* responsePtr = nullptr;
 
-    if (verbose) {
-        std::ios_base::fmtflags f( std::cout.flags() );
+    if (verbose)
+    {
+        std::ios_base::fmtflags f(std::cout.flags());
         std::cout << "Send NCSI Command, EID : " << std::hex << eid
-                << ", PACKAGE : " << std::hex << package
-                << ", CHANNEL : " << std::hex << channel
-                << ", COMMAND : " << std::hex << cmd << std::endl;
-        std::cout.flags( f );
-        if (!payload.empty()) {
+                  << ", PACKAGE : " << std::hex << package
+                  << ", CHANNEL : " << std::hex << channel
+                  << ", COMMAND : " << std::hex << cmd << std::endl;
+        std::cout.flags(f);
+        if (!payload.empty())
+        {
             std::cout << "PAYLOAD :";
-            for (auto& i : payload) {
-                std::cout << " " << std::hex << std::setfill('0') << std::setw(2)
-                        << (int)i;
+            for (auto& i : payload)
+            {
+                std::cout << " " << std::hex << std::setfill('0')
+                          << std::setw(2) << (int)i;
             }
-            std::cout.flags( f );
+            std::cout.flags(f);
             std::cout << std::endl;
         }
     }
 
-    ncsiInfo = applyCmd(eid, Command(NcsiMctpCommands::NCSI_CMD_SEND_RAW_CMD, cmd, payload), responseMsg,
-                        package, channel, verbose);
-    responsePtr = reinterpret_cast<struct ncsi_rsp_pkt_hdr*>(responseMsg.data());
-    parseResponseMsg(responsePtr, ncsiInfo, responseMsg.size() - sizeof(ncsi_pkt_hdr) - sizeof(uint32_t));
+    ncsiInfo = applyCmd(
+        eid, Command(NcsiMctpCommands::NCSI_CMD_SEND_RAW_CMD, cmd, payload),
+        responseMsg, package, channel, verbose);
+    responsePtr =
+        reinterpret_cast<struct ncsi_rsp_pkt_hdr*>(responseMsg.data());
+    parseResponseMsg(responsePtr, ncsiInfo,
+                     responseMsg.size() - sizeof(ncsi_pkt_hdr) -
+                         sizeof(uint32_t));
     return std::get<1>(ncsiInfo);
 }
 

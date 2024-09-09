@@ -4,6 +4,7 @@
 #include "inventory_mac.hpp"
 #endif
 #include "network_manager.hpp"
+#include "network_monitor.hpp"
 #include "rtnetlink_server.hpp"
 #include "types.hpp"
 
@@ -19,7 +20,6 @@
 #include <stdplus/print.hpp>
 #include <stdplus/signal.hpp>
 #include <xyz/openbmc_project/Common/error.hpp>
-#include "network_monitor.hpp"
 
 #include <chrono>
 
@@ -73,7 +73,8 @@ int main()
     stdplus::Pinned<Manager> manager(bus, reload, DEFAULT_OBJPATH,
                                      "/etc/systemd/network");
     netlink::Server svr(event, manager);
-    phosphor::network::networkMonitor = std::make_unique<phosphor::network::NetworkMonitor>(bus);
+    phosphor::network::networkMonitor =
+        std::make_unique<phosphor::network::NetworkMonitor>(bus);
 
 #ifdef SYNC_MAC_FROM_INVENTORY
     auto runtime = inventory::watch(bus, manager);
