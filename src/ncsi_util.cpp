@@ -48,12 +48,15 @@ struct NCSIPacketHeader
     uint32_t rsvd[2];
 };
 
+<<<<<<< HEAD
 struct NCSIResponsePayload
 {
     uint16_t response;
     uint16_t reason;
 };
 
+=======
+>>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
 class NetlinkCommand
 {
   public:
@@ -272,7 +275,11 @@ CallBack sendCallBack = [](struct nl_msg* msg, void*) {
     return static_cast<int>(NL_STOP);
 };
 
+<<<<<<< HEAD
 int applyCmd(NetlinkInterface& interface, const NetlinkCommand& cmd,
+=======
+int applyCmd(Interface& interface, const NetlinkCommand& cmd,
+>>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
              int package = DEFAULT_VALUE, int channel = DEFAULT_VALUE,
              int flags = NONE, CallBack function = nullptr, void* arg = nullptr)
 {
@@ -526,6 +533,7 @@ int NetlinkInterface::setChannelMask(int package, unsigned int mask)
     internal::NetlinkCommand cmd(ncsi_nl_commands::NCSI_CMD_SET_CHANNEL_MASK, 0,
                                  payload);
     return internal::applyCmd(*this, cmd);
+<<<<<<< HEAD
 }
 
 int NCSIResponse::parseFullPayload()
@@ -561,6 +569,8 @@ int NCSIResponse::parseFullPayload()
     this->reason = ntohs(respPayload->reason);
 
     return 0;
+=======
+>>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
 }
 
 } // namespace ncsi
