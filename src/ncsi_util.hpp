@@ -150,6 +150,7 @@ struct Interface
 
 std::string to_string(Interface& interface);
 
+<<<<<<< HEAD
 /* @brief  This function will ask underlying NCSI driver
  *         to send an OEM command (command type 0x50) with
  *         the specified payload as the OEM data.
@@ -165,6 +166,8 @@ std::string to_string(Interface& interface);
 int sendOemCommand(Interface& interface, int package, int channel, int opcode,
                    std::span<const unsigned char> payload);
 
+=======
+>>>>>>> 2d0b48d (ncsi: make Interface virtual)
 struct NetlinkInterface : Interface
 {
     /* implementations for Interface */

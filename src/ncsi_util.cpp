@@ -282,10 +282,14 @@ CallBack sendCallBack = [](struct nl_msg* msg, void*) {
 };
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 int applyCmd(NetlinkInterface& interface, const NetlinkCommand& cmd,
 =======
 int applyCmd(Interface& interface, const NetlinkCommand& cmd,
 >>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
+=======
+int applyCmd(NetlinkInterface& interface, const NetlinkCommand& cmd,
+>>>>>>> 2d0b48d (ncsi: make Interface virtual)
              int package = DEFAULT_VALUE, int channel = DEFAULT_VALUE,
              int flags = NONE, CallBack function = nullptr, void* arg = nullptr)
 {
@@ -438,7 +442,6 @@ std::string to_string(Interface& interface)
     return interface.toString();
 }
 
-<<<<<<< HEAD
 NetlinkInterface::NetlinkInterface(int ifindex) : ifindex(ifindex) {}
 
 std::string NetlinkInterface::toString()
@@ -448,10 +451,6 @@ std::string NetlinkInterface::toString()
 
 std::optional<NCSIResponse> NetlinkInterface::sendCommand(NCSICommand& cmd)
 {
-=======
-std::optional<NCSIResponse> Interface::sendCommand(NCSICommand& cmd)
-{
->>>>>>> b788524 (ncsi: encapsulate NC-SI commands with NCSICommand / NCSIResponse structs)
     lg2::debug("Send Command, CHANNEL : {CHANNEL} , PACKAGE : {PACKAGE}, "
                "INTERFACE: {INTERFACE}",
                "CHANNEL", lg2::hex, cmd.getChannel(), "PACKAGE", lg2::hex,
