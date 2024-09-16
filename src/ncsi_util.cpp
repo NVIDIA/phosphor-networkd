@@ -49,14 +49,20 @@ struct NCSIPacketHeader
 };
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> b788524 (ncsi: encapsulate NC-SI commands with NCSICommand / NCSIResponse structs)
 struct NCSIResponsePayload
 {
     uint16_t response;
     uint16_t reason;
 };
 
+<<<<<<< HEAD
 =======
 >>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
+=======
+>>>>>>> b788524 (ncsi: encapsulate NC-SI commands with NCSICommand / NCSIResponse structs)
 class NetlinkCommand
 {
   public:
@@ -432,6 +438,7 @@ std::string to_string(Interface& interface)
     return interface.toString();
 }
 
+<<<<<<< HEAD
 NetlinkInterface::NetlinkInterface(int ifindex) : ifindex(ifindex) {}
 
 std::string NetlinkInterface::toString()
@@ -441,6 +448,10 @@ std::string NetlinkInterface::toString()
 
 std::optional<NCSIResponse> NetlinkInterface::sendCommand(NCSICommand& cmd)
 {
+=======
+std::optional<NCSIResponse> Interface::sendCommand(NCSICommand& cmd)
+{
+>>>>>>> b788524 (ncsi: encapsulate NC-SI commands with NCSICommand / NCSIResponse structs)
     lg2::debug("Send Command, CHANNEL : {CHANNEL} , PACKAGE : {PACKAGE}, "
                "INTERFACE: {INTERFACE}",
                "CHANNEL", lg2::hex, cmd.getChannel(), "PACKAGE", lg2::hex,
@@ -571,6 +582,41 @@ int NCSIResponse::parseFullPayload()
     return 0;
 =======
 >>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
+}
+
+int NCSIResponse::parseFullPayload()
+{
+    if (this->full_payload.size() < sizeof(internal::NCSIPacketHeader) +
+                                        sizeof(internal::NCSIResponsePayload))
+    {
+        lg2::error("Response: Not enough data for a response message");
+        return -1;
+    }
+
+    internal::NCSIPacketHeader* respHeader =
+        reinterpret_cast<decltype(respHeader)>(this->full_payload.data());
+
+    unsigned int payloadLen = ntohs(respHeader->length & htons(0x0fff));
+    /* we have determined that the payload size is larger than *respHeader,
+     * so cannot underflow here */
+    if (payloadLen > this->full_payload.size() - sizeof(*respHeader))
+    {
+        lg2::error("Invalid header length {HDRLEN} (vs {LEN}) in response",
+                   "HDRLEN", payloadLen, "LEN",
+                   this->full_payload.size() - sizeof(*respHeader));
+        return -1;
+    }
+
+    this->opcode = respHeader->type;
+    this->payload =
+        std::span(this->full_payload.begin() + sizeof(*respHeader), payloadLen);
+
+    internal::NCSIResponsePayload* respPayload =
+        reinterpret_cast<decltype(respPayload)>(this->payload.data());
+    this->response = ntohs(respPayload->response);
+    this->reason = ntohs(respPayload->reason);
+
+    return 0;
 }
 
 } // namespace ncsi

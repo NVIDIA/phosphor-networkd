@@ -93,10 +93,37 @@ struct InterfaceInfo
     std::vector<PackageInfo> packages;
 };
 
+struct NCSICommand
+{
+    /* constructs a message; the payload span is copied into the internal
+     * command vector */
+    NCSICommand(uint8_t opcode, uint8_t package, std::optional<uint8_t> channel,
+                std::span<unsigned char> payload);
+
+    uint8_t getChannel();
+
+    uint8_t opcode;
+    uint8_t package;
+    std::optional<uint8_t> channel;
+    std::vector<unsigned char> payload;
+};
+
+struct NCSIResponse
+{
+    uint8_t opcode;
+    uint8_t response, reason;
+    std::span<unsigned char> payload;
+    std::vector<unsigned char> full_payload;
+
+    /* Given an incoming response with full_payload set, check that we have
+     * enough data for a correct response, and populate the rest of the struct
+     * to suit
+     */
+    int parseFullPayload();
+};
+
 struct Interface
 {
-    using ncsiMessage = std::span<const unsigned char>;
-
     /* @brief  This function will ask underlying NCSI driver
      *         to send an OEM command (command type 0x50) with
      *         the specified payload as the OEM data.
