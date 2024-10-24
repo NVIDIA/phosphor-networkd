@@ -9,8 +9,6 @@
 #include <stdplus/numeric/str.hpp>
 #include <stdplus/str/buf.hpp>
 
-#include <iomanip>
-#include <iostream>
 #include <vector>
 
 namespace phosphor
@@ -30,7 +28,7 @@ static stdplus::StrBuf toHexStr(std::span<const uint8_t> c) noexcept
         return ret;
     }
     stdplus::IntToStr<16, uint8_t> its;
-    auto oit = ret.append(c.size() * 3 - 1);
+    auto oit = ret.append(c.size() * 3);
     auto cit = c.begin();
     oit = its(oit, *cit++, 2);
     for (; cit != c.end(); ++cit)
@@ -38,6 +36,7 @@ static stdplus::StrBuf toHexStr(std::span<const uint8_t> c) noexcept
         *oit++ = ' ';
         oit = its(oit, *cit, 2);
     }
+    *oit = 0;
     return ret;
 }
 
@@ -66,14 +65,13 @@ class Command
     Command(Command&&) = default;
     Command& operator=(Command&&) = default;
     Command(
-        int c, int nc = DEFAULT_VALUE,
+        int ncsiCmd, int operation = DEFAULT_VALUE,
         std::span<const unsigned char> p = std::span<const unsigned char>()) :
-        cmd(c),
-        ncsi_cmd(nc), payload(p)
+        ncsi_cmd(ncsiCmd), operation(operation), payload(p)
     {}
 
-    int cmd;
     int ncsi_cmd;
+    int operation;
     std::span<const unsigned char> payload;
 };
 
@@ -256,8 +254,8 @@ CallBack sendCallBack = [](struct nl_msg* msg, void* arg) {
     }
 
     auto data_len = nla_len(tb[NCSI_ATTR_DATA]) - sizeof(NCSIPacketHeader);
-    unsigned char* data = (unsigned char*)nla_data(tb[NCSI_ATTR_DATA]) +
-                          sizeof(NCSIPacketHeader);
+    unsigned char* data =
+        (unsigned char*)nla_data(tb[NCSI_ATTR_DATA]) + sizeof(NCSIPacketHeader);
 
     // Dump the response to stdout. Enhancement: option to save response data
     auto str = toHexStr(std::span<const unsigned char>(data, data_len));
@@ -300,11 +298,12 @@ int applyCmd(int ifindex, const Command& cmd, int package = DEFAULT_VALUE,
         return -ENOMEM;
     }
 
-    auto msgHdr = genlmsg_put(msg.get(), 0, 0, driverID, 0, flags, cmd.cmd, 0);
+    auto msgHdr = genlmsg_put(msg.get(), NL_AUTO_PORT, NL_AUTO_SEQ, driverID, 0,
+                              flags, cmd.ncsi_cmd, 0);
     if (!msgHdr)
     {
         lg2::error("Unable to add the netlink headers , COMMAND : {COMMAND}",
-                   "COMMAND", cmd.cmd);
+                   "COMMAND", cmd.ncsi_cmd);
         return -ENOMEM;
     }
 
@@ -343,16 +342,38 @@ int applyCmd(int ifindex, const Command& cmd, int package = DEFAULT_VALUE,
         return ret;
     }
 
-    if (cmd.ncsi_cmd != DEFAULT_VALUE)
+    if ((cmd.ncsi_cmd == ncsi_nl_commands::NCSI_CMD_SET_PACKAGE_MASK) ||
+        (cmd.ncsi_cmd == ncsi_nl_commands::NCSI_CMD_SET_CHANNEL_MASK))
     {
-        std::vector<unsigned char> pl(sizeof(NCSIPacketHeader) +
-                                      cmd.payload.size());
+        if (cmd.payload.size() != sizeof(unsigned int))
+        {
+            lg2::error("Package/Channel mask must be 32-bits");
+            return -EINVAL;
+        }
+        int maskAttr =
+            cmd.ncsi_cmd == ncsi_nl_commands::NCSI_CMD_SET_PACKAGE_MASK
+                ? NCSI_ATTR_PACKAGE_MASK
+                : NCSI_ATTR_CHANNEL_MASK;
+        ret = nla_put_u32(
+            msg.get(), maskAttr,
+            *(reinterpret_cast<const unsigned int*>(cmd.payload.data())));
+        if (ret < 0)
+        {
+            lg2::error("Failed to set the mask attribute, RC : {RC}", "RC",
+                       ret);
+            return ret;
+        }
+    }
+    else if (cmd.ncsi_cmd == ncsi_nl_commands::NCSI_CMD_SEND_CMD)
+    {
+        std::vector<unsigned char> pl(
+            sizeof(NCSIPacketHeader) + cmd.payload.size());
         NCSIPacketHeader* hdr = (NCSIPacketHeader*)pl.data();
 
         std::copy(cmd.payload.begin(), cmd.payload.end(),
                   pl.begin() + sizeof(NCSIPacketHeader));
 
-        hdr->type = cmd.ncsi_cmd;
+        hdr->type = cmd.operation;
         hdr->length = htons(cmd.payload.size());
 
         ret = nla_put(msg.get(), ncsi_nl_attrs::NCSI_ATTR_DATA, pl.size(),
@@ -398,10 +419,9 @@ int applyCmd(int ifindex, const Command& cmd, int package = DEFAULT_VALUE,
 
 } // namespace internal
 
-int sendOemCommand(int ifindex, int package, int channel,
+int sendOemCommand(int ifindex, int package, int channel, int operation,
                    std::span<const unsigned char> payload)
 {
-    constexpr auto cmd = 0x50;
     lg2::debug("Send OEM Command, CHANNEL : {CHANNEL} , PACKAGE : {PACKAGE}, "
                "INTERFACE_INDEX: {INTERFACE_INDEX}",
                "CHANNEL", lg2::hex, channel, "PACKAGE", lg2::hex, package,
@@ -413,7 +433,8 @@ int sendOemCommand(int ifindex, int package, int channel,
 
     return internal::applyCmd(
         ifindex,
-        internal::Command(ncsi_nl_commands::NCSI_CMD_SEND_CMD, cmd, payload),
+        internal::Command(ncsi_nl_commands::NCSI_CMD_SEND_CMD, operation,
+                          payload),
         package, channel, NONE, internal::sendCallBack);
 }
 
@@ -454,6 +475,36 @@ int getInfo(int ifindex, int package)
                                   package, DEFAULT_VALUE, NONE,
                                   internal::infoCallBack);
     }
+}
+
+int setPackageMask(int ifindex, unsigned int mask)
+{
+    lg2::debug(
+        "Set Package Mask , INTERFACE_INDEX: {INTERFACE_INDEX} MASK: {MASK}",
+        "INTERFACE_INDEX", lg2::hex, ifindex, "MASK", lg2::hex, mask);
+    auto payload = std::span<const unsigned char>(
+        reinterpret_cast<const unsigned char*>(&mask),
+        reinterpret_cast<const unsigned char*>(&mask) + sizeof(decltype(mask)));
+    return internal::applyCmd(
+        ifindex, internal::Command(ncsi_nl_commands::NCSI_CMD_SET_PACKAGE_MASK,
+                                   0, payload));
+}
+
+int setChannelMask(int ifindex, int package, unsigned int mask)
+{
+    lg2::debug(
+        "Set Channel Mask , INTERFACE_INDEX: {INTERFACE_INDEX}, PACKAGE : {PACKAGE} MASK: {MASK}",
+        "INTERFACE_INDEX", lg2::hex, ifindex, "PACKAGE", lg2::hex, package,
+        "MASK", lg2::hex, mask);
+    auto payload = std::span<const unsigned char>(
+        reinterpret_cast<const unsigned char*>(&mask),
+        reinterpret_cast<const unsigned char*>(&mask) + sizeof(decltype(mask)));
+    return internal::applyCmd(
+        ifindex,
+        internal::Command(ncsi_nl_commands::NCSI_CMD_SET_CHANNEL_MASK, 0,
+                          payload),
+        package);
+    return 0;
 }
 
 } // namespace ncsi

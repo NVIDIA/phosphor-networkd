@@ -79,24 +79,20 @@ static bool validIntfIP(Addr a) noexcept
     return a.isUnicast() && !a.isLoopback();
 }
 
-EthernetInterface::EthernetInterface(stdplus::PinnedRef<sdbusplus::bus_t> bus,
-                                     stdplus::PinnedRef<Manager> manager,
-                                     const AllIntfInfo& info,
-                                     std::string_view objRoot,
-                                     const config::Parser& config,
-                                     bool enabled) :
+EthernetInterface::EthernetInterface(
+    stdplus::PinnedRef<sdbusplus::bus_t> bus,
+    stdplus::PinnedRef<Manager> manager, const AllIntfInfo& info,
+    std::string_view objRoot, const config::Parser& config, bool enabled) :
     EthernetInterface(bus, manager, info, makeObjPath(objRoot, *info.intf.name),
                       config, enabled)
 {}
 
-EthernetInterface::EthernetInterface(stdplus::PinnedRef<sdbusplus::bus_t> bus,
-                                     stdplus::PinnedRef<Manager> manager,
-                                     const AllIntfInfo& info,
-                                     std::string&& objPath,
-                                     const config::Parser& config,
-                                     bool enabled) :
-    Ifaces(bus, objPath.c_str(), Ifaces::action::defer_emit),
-    manager(manager), bus(bus), objPath(std::move(objPath))
+EthernetInterface::EthernetInterface(
+    stdplus::PinnedRef<sdbusplus::bus_t> bus,
+    stdplus::PinnedRef<Manager> manager, const AllIntfInfo& info,
+    std::string&& objPath, const config::Parser& config, bool enabled) :
+    Ifaces(bus, objPath.c_str(), Ifaces::action::defer_emit), manager(manager),
+    bus(bus), objPath(std::move(objPath))
 {
     interfaceName(*info.intf.name, true);
     auto dhcpVal = getDHCPValue(config);
@@ -162,19 +158,6 @@ void EthernetInterface::updateInfo(const InterfaceInfo& info, bool skipSignal)
     }
 }
 
-bool EthernetInterface::originIsManuallyAssigned(IP::AddressOrigin origin)
-{
-    return (
-#ifdef LINK_LOCAL_AUTOCONFIGURATION
-        (origin == IP::AddressOrigin::Static)
-#else
-        (origin == IP::AddressOrigin::Static ||
-         origin == IP::AddressOrigin::LinkLocal)
-#endif
-
-    );
-}
-
 void EthernetInterface::addAddr(const AddressInfo& info)
 {
     IP::AddressOrigin origin = IP::AddressOrigin::Static;
@@ -234,10 +217,10 @@ void EthernetInterface::addStaticNeigh(const NeighborInfo& info)
     }
     else
     {
-        staticNeighbors.emplace(*info.addr, std::make_unique<Neighbor>(
-                                                bus, std::string_view(objPath),
-                                                *this, *info.addr, *info.mac,
-                                                Neighbor::State::Permanent));
+        staticNeighbors.emplace(
+            *info.addr, std::make_unique<Neighbor>(
+                            bus, std::string_view(objPath), *this, *info.addr,
+                            *info.mac, Neighbor::State::Permanent));
     }
 }
 
@@ -397,12 +380,12 @@ bool EthernetInterface::dhcp6(bool value)
 EthernetInterface::DHCPConf EthernetInterface::dhcpEnabled(DHCPConf value)
 {
     auto old4 = EthernetInterfaceIntf::dhcp4();
-    auto new4 = EthernetInterfaceIntf::dhcp4(value == DHCPConf::v4 ||
-                                             value == DHCPConf::v4v6stateless ||
-                                             value == DHCPConf::both);
+    auto new4 = EthernetInterfaceIntf::dhcp4(
+        value == DHCPConf::v4 || value == DHCPConf::v4v6stateless ||
+        value == DHCPConf::both);
     auto old6 = EthernetInterfaceIntf::dhcp6();
-    auto new6 = EthernetInterfaceIntf::dhcp6(value == DHCPConf::v6 ||
-                                             value == DHCPConf::both);
+    auto new6 = EthernetInterfaceIntf::dhcp6(
+        value == DHCPConf::v6 || value == DHCPConf::both);
     auto oldra = EthernetInterfaceIntf::ipv6AcceptRA();
     auto newra = EthernetInterfaceIntf::ipv6AcceptRA(
         value == DHCPConf::v6stateless || value == DHCPConf::v4v6stateless ||
@@ -452,13 +435,6 @@ bool EthernetInterface::nicEnabled(bool value)
 
     EthernetInterfaceIntf::nicEnabled(value);
     writeConfigurationFile();
-    if (!value)
-    {
-        // We only need to bring down the interface, networkd will always bring
-        // up managed interfaces
-        manager.get().addReloadPreHook(
-            [ifname = interfaceName()]() { system::setNICUp(ifname, false); });
-    }
     manager.get().reloadConfigs();
     return value;
 }
@@ -512,9 +488,9 @@ void EthernetInterface::loadNameServers(const config::Parser& config)
 ServerList EthernetInterface::getNTPServerFromTimeSyncd()
 {
     ServerList servers; // Variable to capture the NTP Server IPs
-    auto method = bus.get().new_method_call(TIMESYNCD_SERVICE,
-                                            TIMESYNCD_SERVICE_PATH,
-                                            PROPERTY_INTERFACE, METHOD_GET);
+    auto method =
+        bus.get().new_method_call(TIMESYNCD_SERVICE, TIMESYNCD_SERVICE_PATH,
+                                  PROPERTY_INTERFACE, METHOD_GET);
 
     method.append(TIMESYNCD_INTERFACE, "LinkNTPServers");
 
@@ -709,7 +685,7 @@ void EthernetInterface::writeConfigurationFile()
 #endif
         if (!EthernetInterfaceIntf::nicEnabled())
         {
-            link["Unmanaged"].emplace_back("yes");
+            link["ActivationPolicy"].emplace_back("down");
         }
     }
     {
@@ -751,7 +727,7 @@ void EthernetInterface::writeConfigurationFile()
             auto& address = network["Address"];
             for (const auto& addr : addrs)
             {
-                if (originIsManuallyAssigned(addr.second->origin()))
+                if (addr.second->origin() == IP::AddressOrigin::Static)
                 {
                     address.emplace_back(stdplus::toStr(addr.first));
                 }
@@ -814,8 +790,8 @@ void EthernetInterface::writeConfigurationFile()
         dhcp6["SendHostname"].emplace_back(
             tfStr(dhcp6Conf->sendHostNameEnabled()));
     }
-    auto path = config::pathForIntfConf(manager.get().getConfDir(),
-                                        interfaceName());
+    auto path =
+        config::pathForIntfConf(manager.get().getConfDir(), interfaceName());
     config.writeFile(path);
     lg2::info("Wrote networkd file: {CFG_FILE}", "CFG_FILE", path);
     writeUpdatedTime(manager, path);
@@ -997,8 +973,9 @@ void EthernetInterface::VlanProperties::delete_()
     if (eth.get().ifIdx > 0)
     {
         // We need to forcibly delete the interface as systemd does not
-        eth.get().manager.get().addReloadPostHook(
-            [idx = eth.get().ifIdx]() { system::deleteIntf(idx); });
+        eth.get().manager.get().addReloadPostHook([idx = eth.get().ifIdx]() {
+            system::deleteIntf(idx);
+        });
 
         // Ignore the interface so the reload doesn't re-query it
         eth.get().manager.get().ignoredIntf.emplace(eth.get().ifIdx);

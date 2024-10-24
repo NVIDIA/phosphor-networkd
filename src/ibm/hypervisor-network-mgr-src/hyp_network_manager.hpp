@@ -12,9 +12,6 @@ namespace phosphor
 namespace network
 {
 
-class HypEthInterface;
-class HypSysConfig;
-
 using biosAttrName = std::string;
 using biosAttrType = std::string;
 using biosAttrIsReadOnly = bool;
@@ -68,7 +65,7 @@ class HypNetworkMgr
      *  @param[in] path - Path to attach at.
      */
     HypNetworkMgr(sdbusplus::bus_t& bus, const char* path) :
-        bus(bus), objectPath(path){};
+        bus(bus), objectPath(path) {};
 
     /** @brief Get the BaseBiosTable attributes
      *

@@ -1,5 +1,4 @@
 #pragma once
-#include "hyp_network_manager.hpp"
 
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/server/object.hpp>
@@ -41,8 +40,8 @@ class HypSysConfig : public Iface
      */
     HypSysConfig(sdbusplus::bus_t& bus, const std::string& objPath,
                  HypNetworkMgr& parent) :
-        Iface(bus, objPath.c_str(), Iface::action::defer_emit),
-        bus(bus), manager(parent){};
+        Iface(bus, objPath.c_str(), Iface::action::defer_emit), bus(bus),
+        manager(parent) {};
 
     /** @brief set the hostname of the system.
      *  @param[in] name - host name of the system.

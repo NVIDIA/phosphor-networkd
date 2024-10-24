@@ -15,9 +15,7 @@
  */
 #include "argument.hpp"
 
-#include <algorithm>
 #include <iostream>
-#include <iterator>
 
 namespace phosphor
 {
@@ -66,18 +64,35 @@ const std::string& ArgumentParser::operator[](const std::string& opt)
 void ArgumentParser::usage(char** argv)
 {
     std::cerr << "Usage: " << argv[0] << " [options]\n";
-    std::cerr << "Options:\n";
-    std::cerr << "    --help            Print this menu.\n";
-    std::cerr << "    --info=<info>     Retrieve info about NCSI topology.\n";
-    std::cerr << "    --set=<set>       Set a specific package/channel.\n";
     std::cerr
-        << "    --clear=<clear>   Clear all the settings on the interface.\n";
-    std::cerr
-        << "    --oem-payload=<hex data> Send an OEM command with payload.\n";
-    std::cerr << "    --package=<package>  Specify a package.\n";
-    std::cerr << "    --channel=<channel> Specify a channel.\n";
-    std::cerr << "    --index=<device index> Specify device ifindex.\n";
-    std::cerr << std::flush;
+        << "Options:\n"
+           "    --help | -h       Print this menu.\n"
+           "    --index=<device index> | -x <device index> Specify device ifindex.\n"
+           "    --package=<package> | -p <package> Specify a package.\n"
+           "    --channel=<channel> | -c <channel> Specify a channel.\n"
+           "    --info  | -i      Retrieve info about NCSI topology.\n"
+           "    --set   | -s      Set a specific package/channel.\n"
+           "    --clear | -r      Clear all the settings on the interface.\n"
+           "    --oem-payload=<hex data...> | -o <hex data...> Send an OEM command with payload.\n"
+           "    --pmask=<mask> | -j <mask> Bitmask to enable/disable packages\n"
+           "    --cmask=<mask> | -k <mask> Bitmask to enable/disable channels\n"
+           "\n"
+           "Example commands:\n"
+           "    1) Retrieve topology information:\n"
+           "         ncsi-netlink -x 3 -p 0 -i\n"
+           "    2) Set preferred package\n"
+           "         ncsi-netlink -x 3 -p 0 -s\n"
+           "    3) Set preferred channel\n"
+           "         ncsi-netlink -x 3 -p 0 -c 1 -s\n"
+           "    4) Clear preferred channel\n"
+           "         ncsi-netlink -x 3 -p 0 -r\n"
+           "    5) Send NCSI Command\n"
+           "         ncsi-netlink -x 3 -p 0 -c 0 -o 50000001572100\n"
+           "    6) Set Package Mask\n"
+           "         ncsi-netlink -x 3 -j 1\n"
+           "    7) Set Channel Mask\n"
+           "         ncsi-netlink -x 3 -p 0 -k 1\n"
+           "\n";
 }
 
 const option ArgumentParser::options[] = {
@@ -89,10 +104,12 @@ const option ArgumentParser::options[] = {
     {"channel", required_argument, NULL, 'c'},
     {"index", required_argument, NULL, 'x'},
     {"help", no_argument, NULL, 'h'},
+    {"pmask", required_argument, NULL, 'j'},
+    {"cmask", required_argument, NULL, 'k'},
     {0, 0, 0, 0},
 };
 
-const char* ArgumentParser::optionStr = "i:s:r:o:p:c:x:h?";
+const char* ArgumentParser::optionStr = "irsj:k:x:o:p:c:h?";
 
 const std::string ArgumentParser::trueString = "true";
 const std::string ArgumentParser::emptyString = "";
