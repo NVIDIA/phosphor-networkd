@@ -226,6 +226,11 @@ class EthernetInterface : public Ifaces
      */
     void reloadConfigs();
 
+    /** @brief set conf file for LLDP
+     *  @param[in] value - lldp value of the interface.
+     */
+    bool emitLLDP(bool value) override;
+
     using EthernetInterfaceIntf::interfaceName;
     using EthernetInterfaceIntf::linkUp;
     using EthernetInterfaceIntf::mtu;
@@ -234,6 +239,7 @@ class EthernetInterface : public Ifaces
 
     using EthernetInterfaceIntf::defaultGateway;
     using EthernetInterfaceIntf::defaultGateway6;
+    using EthernetInterfaceIntf::emitLLDP;
 
   protected:
     /** @brief get the NTP server list from the timsyncd dbus obj
