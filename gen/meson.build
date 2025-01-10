@@ -11,7 +11,7 @@ if sdbuspp_gen_meson_ver != 'sdbus++-gen-meson version 10'
     warning('Generated meson files from wrong version of sdbus++-gen-meson.')
     warning(
         'Expected "sdbus++-gen-meson version 10", got:',
-        sdbuspp_gen_meson_ver,
+        sdbuspp_gen_meson_ver
     )
 endif
 

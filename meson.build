@@ -33,7 +33,7 @@ if sdbusplus_dep.type_name() == 'internal'
     )
 endif
 
-yaml_selected_subdirs = ['xyz']
+yaml_selected_subdirs = [ 'xyz' ]
 should_generate_cpp = true
 should_generate_markdown = false
 should_generate_registry = false
