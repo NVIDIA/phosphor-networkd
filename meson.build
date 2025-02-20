@@ -24,6 +24,7 @@ conf_data.set('PERSIST_MAC', get_option('persist-mac'))
 conf_data.set10('FORCE_SYNC_MAC_FROM_INVENTORY', get_option('force-sync-mac'))
 conf_data.set_quoted('STATIC_IF_LIST', get_option('static-if-list'))
 conf_data.set_quoted('VENDOR_CLASS_ID', get_option('vendor_class_id'))
+conf_data.set('VENDOR_CLASS_ID_UNQUOTED', get_option('vendor_class_id'))
 
 sdbusplus_dep = dependency('sdbusplus')
 sdbusplusplus_prog = find_program('sdbus++', native: true)
