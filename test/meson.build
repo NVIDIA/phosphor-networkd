@@ -54,7 +54,10 @@ tests = [
     'rtnetlink',
     'types',
     'util',
+<<<<<<< HEAD
     'network_monitor',
+=======
+>>>>>>> 297a63b (meson: reformat with meson formatter)
 ]
 
 run_with_tmp = find_program('run_with_tmp', native: true)

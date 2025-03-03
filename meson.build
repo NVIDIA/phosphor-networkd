@@ -33,7 +33,7 @@ if sdbusplus_dep.type_name() == 'internal'
     )
 endif
 
-yaml_selected_subdirs = [ 'xyz' ]
+yaml_selected_subdirs = ['xyz']
 should_generate_cpp = true
 should_generate_markdown = false
 should_generate_registry = false
@@ -97,6 +97,7 @@ configure_file(
     install: true,
     install_dir: get_option('datadir') / 'dbus-1' / 'system.d',
 )
+<<<<<<< HEAD
 
 configure_file(
     input: 'bmc-network-online.target.in',
@@ -107,6 +108,8 @@ configure_file(
         pkgconfig: 'systemdsystemunitdir',
     ),
 )
+=======
+>>>>>>> 297a63b (meson: reformat with meson formatter)
 
 if get_option('tests').allowed()
     subdir('test')
