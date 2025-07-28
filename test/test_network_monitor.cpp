@@ -50,32 +50,33 @@ TEST_F(TestNetworkMonitor, StartOnlineTargetTest)
 
     EXPECT_CALL(sdbus_mock, sd_bus_message_read_basic(IsNull(), 's', NotNull()))
         .WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
-        const char** s = static_cast<const char**>(p);
-        (void)m;
-        (void)type;
-        *s = "AddressState";
-        return 0;
-    }))
+            const char** s = static_cast<const char**>(p);
+            (void)m;
+            (void)type;
+            *s = "AddressState";
+            return 0;
+        }))
         .WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
-        const char** s = static_cast<const char**>(p);
-        (void)m;
-        (void)type;
-        *s = "routable";
-        return 0;
-    }))
+            const char** s = static_cast<const char**>(p);
+            (void)m;
+            (void)type;
+            *s = "routable";
+            return 0;
+        }))
         .WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
-        const char** s = static_cast<const char**>(p);
-        (void)m;
-        (void)type;
-        *s = "OnlineState";
-        return 0;
-    })).WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
-        const char** s = static_cast<const char**>(p);
-        (void)m;
-        (void)type;
-        *s = "partial";
-        return 0;
-    }));
+            const char** s = static_cast<const char**>(p);
+            (void)m;
+            (void)type;
+            *s = "OnlineState";
+            return 0;
+        }))
+        .WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
+            const char** s = static_cast<const char**>(p);
+            (void)m;
+            (void)type;
+            *s = "partial";
+            return 0;
+        }));
 
     // while !at_end()
     EXPECT_CALL(sdbus_mock, sd_bus_message_at_end(IsNull(), 0))
@@ -111,32 +112,33 @@ TEST_F(TestNetworkMonitor, StopOnlineTargetTest)
 
     EXPECT_CALL(sdbus_mock, sd_bus_message_read_basic(IsNull(), 's', NotNull()))
         .WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
-        const char** s = static_cast<const char**>(p);
-        (void)m;
-        (void)type;
-        *s = "AddressState";
-        return 0;
-    }))
+            const char** s = static_cast<const char**>(p);
+            (void)m;
+            (void)type;
+            *s = "AddressState";
+            return 0;
+        }))
         .WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
-        const char** s = static_cast<const char**>(p);
-        (void)m;
-        (void)type;
-        *s = "degraded";
-        return 0;
-    }))
+            const char** s = static_cast<const char**>(p);
+            (void)m;
+            (void)type;
+            *s = "degraded";
+            return 0;
+        }))
         .WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
-        const char** s = static_cast<const char**>(p);
-        (void)m;
-        (void)type;
-        *s = "OnlineState";
-        return 0;
-    })).WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
-        const char** s = static_cast<const char**>(p);
-        (void)m;
-        (void)type;
-        *s = "offline";
-        return 0;
-    }));
+            const char** s = static_cast<const char**>(p);
+            (void)m;
+            (void)type;
+            *s = "OnlineState";
+            return 0;
+        }))
+        .WillOnce(Invoke([&](sd_bus_message* m, char type, void* p) {
+            const char** s = static_cast<const char**>(p);
+            (void)m;
+            (void)type;
+            *s = "offline";
+            return 0;
+        }));
 
     // while !at_end()
     EXPECT_CALL(sdbus_mock, sd_bus_message_at_end(IsNull(), 0))

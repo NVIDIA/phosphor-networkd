@@ -249,9 +249,8 @@ class EthernetInterface : public Ifaces
     /** @brief get a optioin from the network configuration file
      *
      */
-    std::optional<std::vector<std::string>>
-        getOptionFromConf(const std::string& sectionName,
-                          const std::string& optionName);
+    std::optional<std::vector<std::string>> getOptionFromConf(
+        const std::string& sectionName, const std::string& optionName);
 
     /** @brief get a optioin from the network configuration file and transfer it
      *         to TYPE

@@ -158,10 +158,9 @@ struct ncsi_rsp_oem_pkt
  *
  * @return ncsi_requester_rc_t (errno may be set)
  */
-ncsi_requester_rc_t ncsi_send_recv(mctp_eid_t eid, int mctp_fd,
-                                   const uint8_t* ncsi_req_msg,
-                                   size_t req_msg_len, uint8_t** ncsi_resp_msg,
-                                   size_t* resp_msg_len);
+ncsi_requester_rc_t ncsi_send_recv(
+    mctp_eid_t eid, int mctp_fd, const uint8_t* ncsi_req_msg,
+    size_t req_msg_len, uint8_t** ncsi_resp_msg, size_t* resp_msg_len);
 
 /**
  * @brief Send a NCSI request message, don't wait for response. Essentially an
@@ -213,9 +212,8 @@ ncsi_requester_rc_t ncsi_recv(mctp_eid_t eid, int mctp_fd, uint8_t instance_id,
  * @return ncsi_requester_rc_t (errno may be set). failure is returned even
  *         when data was read, but wasn't a NCSI response message
  */
-ncsi_requester_rc_t ncsi_recv_any(mctp_eid_t eid, int mctp_fd,
-                                  uint8_t** ncsi_resp_msg,
-                                  size_t* resp_msg_len);
+ncsi_requester_rc_t ncsi_recv_any(
+    mctp_eid_t eid, int mctp_fd, uint8_t** ncsi_resp_msg, size_t* resp_msg_len);
 
 /**
  * @brief Calculate NCSI checksum. Return the checksum value for the NCSI

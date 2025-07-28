@@ -106,8 +106,8 @@ std::tuple<int, int, std::vector<uint8_t>> getMctpSockInfo(uint8_t remoteEID)
     try
     {
         const Interfaces ifaceList{"xyz.openbmc_project.MCTP.Endpoint"};
-        auto getSubTreeResponse = getSubtree("/xyz/openbmc_project/mctp", 0,
-                                             std::move(ifaceList));
+        auto getSubTreeResponse =
+            getSubtree("/xyz/openbmc_project/mctp", 0, std::move(ifaceList));
         for (const auto& [objPath, mapperServiceMap] : getSubTreeResponse)
         {
             for (const auto& [serviceName, interfaces] : mapperServiceMap)

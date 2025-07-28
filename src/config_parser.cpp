@@ -196,6 +196,10 @@ struct Parse
         {
             new_warnings.emplace_back(std::format(
                 "{}:{}: KV missing `=`", filename.get().native(), lineno));
+            warnings.insert(warnings.end(),
+                            std::make_move_iterator(new_warnings.begin()),
+                            std::make_move_iterator(new_warnings.end()));
+            return;
         }
         auto k = line.substr(0, epos);
         removePadding(k);

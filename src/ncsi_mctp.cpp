@@ -26,9 +26,8 @@
  * @return ncsi_requester_rc_t (errno may be set). failure is returned even
  *         when data was read, but wasn't a NCSI response message
  */
-static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
-                                     uint8_t** ncsi_resp_msg,
-                                     size_t* resp_msg_len)
+static ncsi_requester_rc_t mctp_recv(
+    mctp_eid_t eid, int mctp_fd, uint8_t** ncsi_resp_msg, size_t* resp_msg_len)
 {
     uint8_t msgTag = 0;
     ssize_t min_len = sizeof(msgTag) + sizeof(eid) +
@@ -55,8 +54,8 @@ static ncsi_requester_rc_t mctp_recv(mctp_eid_t eid, int mctp_fd,
     else
     {
         struct iovec iov[2];
-        size_t mctp_prefix_len = sizeof(msgTag) + sizeof(eid) +
-                                 sizeof(MCTP_MSG_TYPE_NCSI);
+        size_t mctp_prefix_len =
+            sizeof(msgTag) + sizeof(eid) + sizeof(MCTP_MSG_TYPE_NCSI);
         std::unique_ptr<uint8_t> mctp_prefix =
             std::make_unique<uint8_t>(mctp_prefix_len);
         size_t ncsi_len = length - mctp_prefix_len;
@@ -127,8 +126,8 @@ ncsi_requester_rc_t ncsi_recv_any(mctp_eid_t eid, int mctp_fd,
 ncsi_requester_rc_t ncsi_recv(mctp_eid_t eid, int mctp_fd, uint8_t instance_id,
                               uint8_t** ncsi_resp_msg, size_t* resp_msg_len)
 {
-    ncsi_requester_rc_t rc = ncsi_recv_any(eid, mctp_fd, ncsi_resp_msg,
-                                           resp_msg_len);
+    ncsi_requester_rc_t rc =
+        ncsi_recv_any(eid, mctp_fd, ncsi_resp_msg, resp_msg_len);
     if (rc != NCSI_REQUESTER_SUCCESS)
     {
         return rc;
@@ -143,10 +142,9 @@ ncsi_requester_rc_t ncsi_recv(mctp_eid_t eid, int mctp_fd, uint8_t instance_id,
     return NCSI_REQUESTER_SUCCESS;
 }
 
-ncsi_requester_rc_t ncsi_send_recv(mctp_eid_t eid, int mctp_fd,
-                                   const uint8_t* ncsi_req_msg,
-                                   size_t req_msg_len, uint8_t** ncsi_resp_msg,
-                                   size_t* resp_msg_len)
+ncsi_requester_rc_t ncsi_send_recv(
+    mctp_eid_t eid, int mctp_fd, const uint8_t* ncsi_req_msg,
+    size_t req_msg_len, uint8_t** ncsi_resp_msg, size_t* resp_msg_len)
 {
     struct ncsi_pkt_hdr* hdr = (struct ncsi_pkt_hdr*)ncsi_req_msg;
     struct timespec now = {};
