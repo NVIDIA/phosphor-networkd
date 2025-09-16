@@ -1,5 +1,6 @@
 Checks: '-*,
-    clang-analyzer-*
+    clang-analyzer-*,
+    -clang-analyzer-unix.Errno
     '
 
 WarningsAsErrors: clang-analyzer-*

@@ -107,6 +107,10 @@ class EthernetInterface : public Ifaces
     void addAddr(const AddressInfo& info);
     void addStaticNeigh(const NeighborInfo& info);
     void addStaticGateway(const StaticGatewayInfo& info);
+<<<<<<< HEAD
+=======
+
+>>>>>>> 4e33de1 (Resolve conflicts and Fix CI issues)
     /** @brief Updates the interface information based on new InterfaceInfo */
     void updateInfo(const InterfaceInfo& info, bool skipSignal = false);
 
