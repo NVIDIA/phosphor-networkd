@@ -18,25 +18,6 @@ executable(
     install: true,
     install_dir: get_option('bindir'),
 )
-<<<<<<< HEAD
-
-executable(
-    'ncsi-cmd',
-    'ncsi_cmd.cpp',
-    'ncsi_util.cpp',
-    implicit_include_directories: false,
-    include_directories: src_includes,
-    dependencies: [
-        dependency('libnl-3.0'),
-        dependency('libnl-genl-3.0'),
-        dependency('phosphor-logging'),
-        stdplus_dep,
-    ],
-    install: true,
-    install_dir: get_option('bindir'),
-)
-=======
->>>>>>> 297a63b (meson: reformat with meson formatter)
 
 executable(
     'ncsi-cmd',

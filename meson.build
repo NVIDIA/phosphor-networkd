@@ -10,6 +10,7 @@ default_busname = 'xyz.openbmc_project.Network'
 
 conf_data = configuration_data()
 conf_data.set_quoted('DEFAULT_BUSNAME', default_busname)
+conf_data.set('HAVE_UBOOT_ENV', get_option('uboot-env'))
 conf_data.set(
     'LINK_LOCAL_AUTOCONFIGURATION',
     get_option('default-link-local-autoconf'),
@@ -86,21 +87,6 @@ configure_file(
         'DEFAULT_BUSNAME': default_busname,
     },
     install: true,
-<<<<<<< HEAD
-    install_dir: dependency('systemd').get_variable('systemd_system_unit_dir'),
-)
-
-configure_file(
-    input: 'xyz.openbmc_project.Network.conf.in',
-    output: 'xyz.openbmc_project.Network.conf',
-    configuration: {'DEFAULT_BUSNAME': default_busname},
-    install: true,
-    install_dir: get_option('datadir') / 'dbus-1' / 'system.d',
-)
-<<<<<<< HEAD
-
-configure_file(
-=======
     install_dir: dependency('systemd').get_variable('systemdsystemunitdir'),
 )
 
@@ -113,7 +99,6 @@ configure_file(
 )
 
 configure_file(
->>>>>>> 4e33de1 (Resolve conflicts and Fix CI issues)
     input: 'bmc-network-online.target.in',
     output: 'bmc-network-online.target',
     configuration: {'DEFAULT_BUSNAME': default_busname},
@@ -122,11 +107,6 @@ configure_file(
         pkgconfig: 'systemdsystemunitdir',
     ),
 )
-<<<<<<< HEAD
-=======
->>>>>>> 297a63b (meson: reformat with meson formatter)
-=======
->>>>>>> 4e33de1 (Resolve conflicts and Fix CI issues)
 
 if get_option('tests').allowed()
     subdir('test')

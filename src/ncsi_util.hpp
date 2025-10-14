@@ -70,58 +70,6 @@ struct NCSIResponse
     int parseFullPayload();
 };
 
-struct ChannelInfo
-{
-    uint32_t id;
-    bool active;
-    bool forced;
-    uint32_t version_major, version_minor;
-    std::string version;
-    uint32_t link_state;
-    std::vector<uint16_t> vlan_ids;
-};
-
-struct PackageInfo
-{
-    uint32_t id;
-    bool forced;
-    std::vector<ChannelInfo> channels;
-};
-
-struct InterfaceInfo
-{
-    std::vector<PackageInfo> packages;
-};
-
-struct NCSICommand
-{
-    /* constructs a message; the payload span is copied into the internal
-     * command vector */
-    NCSICommand(uint8_t opcode, uint8_t package, std::optional<uint8_t> channel,
-                std::span<unsigned char> payload);
-
-    uint8_t getChannel();
-
-    uint8_t opcode;
-    uint8_t package;
-    std::optional<uint8_t> channel;
-    std::vector<unsigned char> payload;
-};
-
-struct NCSIResponse
-{
-    uint8_t opcode;
-    uint8_t response, reason;
-    std::span<unsigned char> payload;
-    std::vector<unsigned char> full_payload;
-
-    /* Given an incoming response with full_payload set, check that we have
-     * enough data for a correct response, and populate the rest of the struct
-     * to suit
-     */
-    int parseFullPayload();
-};
-
 struct Interface
 {
     /* @brief  This function will ask underlying NCSI driver
@@ -218,6 +166,27 @@ struct NetlinkInterface : Interface
     NetlinkInterface(int ifindex);
 
     int ifindex;
+};
+
+/* MCTP-based NCSI interface implementation */
+struct MCTPInterface : Interface
+{
+    /* implementations for Interface */
+    std::optional<NCSIResponse> sendCommand(NCSICommand& cmd) override;
+    std::string toString() override;
+
+    /* constructor/destructor */
+    MCTPInterface(int net, uint8_t eid);
+    ~MCTPInterface();
+
+    /* allocate next Instance ID for this EID */
+    std::optional<uint8_t> allocateIID();
+
+  private:
+    /* members identifying the MCTP destination */
+    int net;
+    uint8_t eid;
+    int sd;
 };
 
 } // namespace ncsi

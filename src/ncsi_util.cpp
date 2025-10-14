@@ -55,21 +55,12 @@ struct NCSIPacketHeader
     uint32_t rsvd[2];
 };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> b788524 (ncsi: encapsulate NC-SI commands with NCSICommand / NCSIResponse structs)
 struct NCSIResponsePayload
 {
     uint16_t response;
     uint16_t reason;
 };
 
-<<<<<<< HEAD
-=======
->>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
-=======
->>>>>>> b788524 (ncsi: encapsulate NC-SI commands with NCSICommand / NCSIResponse structs)
 class NetlinkCommand
 {
   public:
@@ -243,7 +234,7 @@ struct sendCallBackContext
     NCSIResponse resp;
 };
 
-CallBack sendCallBack = [](struct nl_msg* msg, void*) {
+CallBack sendCallBack = [](struct nl_msg* msg, void* arg) {
     using namespace phosphor::network::ncsi;
     auto nlh = nlmsg_hdr(msg);
     struct nlattr* tb[NCSI_ATTR_MAX + 1] = {nullptr};
@@ -288,15 +279,7 @@ CallBack sendCallBack = [](struct nl_msg* msg, void*) {
     return static_cast<int>(NL_STOP);
 };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 int applyCmd(NetlinkInterface& interface, const NetlinkCommand& cmd,
-=======
-int applyCmd(Interface& interface, const NetlinkCommand& cmd,
->>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
-=======
-int applyCmd(NetlinkInterface& interface, const NetlinkCommand& cmd,
->>>>>>> 2d0b48d (ncsi: make Interface virtual)
              int package = DEFAULT_VALUE, int channel = DEFAULT_VALUE,
              int flags = NONE, CallBack function = nullptr, void* arg = nullptr)
 {
@@ -550,44 +533,6 @@ int NetlinkInterface::setChannelMask(int package, unsigned int mask)
     internal::NetlinkCommand cmd(ncsi_nl_commands::NCSI_CMD_SET_CHANNEL_MASK, 0,
                                  payload);
     return internal::applyCmd(*this, cmd);
-<<<<<<< HEAD
-}
-
-int NCSIResponse::parseFullPayload()
-{
-    if (this->full_payload.size() < sizeof(internal::NCSIPacketHeader) +
-                                        sizeof(internal::NCSIResponsePayload))
-    {
-        lg2::error("Response: Not enough data for a response message");
-        return -1;
-    }
-
-    internal::NCSIPacketHeader* respHeader =
-        reinterpret_cast<decltype(respHeader)>(this->full_payload.data());
-
-    unsigned int payloadLen = ntohs(respHeader->length & htons(0x0fff));
-    /* we have determined that the payload size is larger than *respHeader,
-     * so cannot underflow here */
-    if (payloadLen > this->full_payload.size() - sizeof(*respHeader))
-    {
-        lg2::error("Invalid header length {HDRLEN} (vs {LEN}) in response",
-                   "HDRLEN", payloadLen, "LEN",
-                   this->full_payload.size() - sizeof(*respHeader));
-        return -1;
-    }
-
-    this->opcode = respHeader->type;
-    this->payload =
-        std::span(this->full_payload.begin() + sizeof(*respHeader), payloadLen);
-
-    internal::NCSIResponsePayload* respPayload =
-        reinterpret_cast<decltype(respPayload)>(this->payload.data());
-    this->response = ntohs(respPayload->response);
-    this->reason = ntohs(respPayload->reason);
-
-    return 0;
-=======
->>>>>>> 3f34ff6 (ncsi_util: rename Command to NetlinkCommand)
 }
 
 int NCSIResponse::parseFullPayload()
