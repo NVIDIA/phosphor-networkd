@@ -103,6 +103,9 @@ EthernetInterface::EthernetInterface(
     EthernetInterfaceIntf::dhcp6(dhcpVal.v6, true);
     EthernetInterfaceIntf::ipv6AcceptRA(getIPv6AcceptRA(config), true);
     EthernetInterfaceIntf::nicEnabled(enabled, true);
+    EthernetInterfaceIntf::mtu(0, true);
+    MacAddressIntf::macAddress("", true);
+    EthernetInterfaceIntf::linkUp(false, true);
     auto lldpVal = parseLLDPConf();
     if (!lldpVal.empty())
     {
