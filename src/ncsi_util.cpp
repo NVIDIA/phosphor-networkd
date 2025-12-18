@@ -145,7 +145,7 @@ CallBack infoCallBack = [](struct nl_msg* msg, void* arg) {
             return -1;
         }
 
-        PackageInfo pkg;
+        PackageInfo pkg{};
 
         if (packagetb[NCSI_PKG_ATTR_ID])
         {
@@ -177,7 +177,7 @@ CallBack infoCallBack = [](struct nl_msg* msg, void* arg) {
                 continue;
             }
 
-            ChannelInfo chan;
+            ChannelInfo chan{};
 
             if (channeltb[NCSI_CHANNEL_ATTR_ID])
             {

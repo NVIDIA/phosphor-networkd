@@ -119,7 +119,7 @@ static std::optional<unsigned int> parseUnsigned(const char* str,
 {
     try
     {
-        unsigned long tmp = std::stoul(str, NULL, 16);
+        unsigned long long tmp = std::stoull(str, NULL, 16);
         if (tmp <= UINT_MAX)
             return tmp;
     }
@@ -209,7 +209,7 @@ static std::optional<std::vector<unsigned char>> parsePayload(
 
         for (unsigned int i = 0; i < sv.size(); i += 2)
         {
-            unsigned char byte;
+            unsigned char byte = 0;
             auto begin = sv.data() + i;
             auto end = begin + 2;
 
@@ -228,7 +228,7 @@ static std::optional<std::vector<unsigned char>> parsePayload(
         /* multiple payload arguments, each is a separate hex byte */
         for (int i = 0; i < argc; i++)
         {
-            unsigned char byte;
+            unsigned char byte = 0;
             auto begin = argv[i];
             auto end = begin + strlen(begin);
 
@@ -560,9 +560,11 @@ static int ncsiDump(GlobalOptions& options, uint32_t handle,
     // Validate handle
     if (handle != NCSI_CORE_DUMP_HANDLE && handle != NCSI_CRASH_DUMP_HANDLE)
     {
+        auto flags = std::cerr.flags();
         std::cerr
             << "Invalid data handle value. Expected NCSI_CORE_DUMP_HANDLE (0xFFFF0000) or NCSI_CRASH_DUMP_HANDLE (0xFFFF0001), got: "
             << std::hex << handle << "\n";
+        std::cerr.flags(flags);
         if (outFile.is_open())
             outFile.close();
         return -1;
@@ -803,59 +805,72 @@ int main(int argc, char** argv)
 {
     const char* progname = argv[0];
 
-    auto opts = parseGlobalOptions(argc, argv);
-
-    if (!opts.has_value())
+    try
     {
+        auto opts = parseGlobalOptions(argc, argv);
+
+        if (!opts.has_value())
+        {
+            return EXIT_FAILURE;
+        }
+
+        auto [globalOptions, consumed] = std::move(*opts);
+
+        if (consumed >= argc)
+        {
+            std::cerr << "Missing subcommand command type\n";
+            return EXIT_FAILURE;
+        }
+
+        /* We have parsed the global options, advance argv & argc to allow the
+         * subcommand handlers to consume their own options
+         */
+        argc -= consumed;
+        argv += consumed;
+
+        std::string subcommand = argv[0];
+
+        // For non-discovery commands, package must be provided.
+        if (subcommand != "discover" && !globalOptions.package.has_value())
+        {
+            std::cerr << "Missing package, add a --package argument\n";
+            return EXIT_FAILURE;
+        }
+
+        int ret = -1;
+
+        if (subcommand == "raw")
+        {
+            ret = ncsiCommandRaw(globalOptions, argc, argv);
+        }
+        else if (subcommand == "oem")
+        {
+            ret = ncsiCommandOEM(globalOptions, argc, argv);
+        }
+        else if (subcommand == "core-dump" || subcommand == "crash-dump")
+        {
+            ret = ncsiCommandReceiveDump(globalOptions, subcommand, argc, argv);
+        }
+        else if (subcommand == "discover")
+        {
+            return ncsiDiscover(globalOptions);
+        }
+        else
+        {
+            std::cerr << "Unknown subcommand '" << subcommand << "'\n";
+            print_usage(progname);
+        }
+
+        return ret ? EXIT_FAILURE : EXIT_SUCCESS;
+    }
+    catch (const std::system_error& e)
+    {
+        std::cerr << "System error: " << e.what() << "\n";
         return EXIT_FAILURE;
     }
-
-    auto [globalOptions, consumed] = std::move(*opts);
-
-    if (consumed >= argc)
+    catch (const std::exception& e)
     {
-        std::cerr << "Missing subcommand command type\n";
+        std::cerr << "Error: " << e.what() << "\n";
         return EXIT_FAILURE;
     }
-
-    /* We have parsed the global options, advance argv & argc to allow the
-     * subcommand handlers to consume their own options
-     */
-    argc -= consumed;
-    argv += consumed;
-
-    std::string subcommand = argv[0];
-
-    // For non-discovery commands, package must be provided.
-    if (subcommand != "discover" && !globalOptions.package.has_value())
-    {
-        std::cerr << "Missing package, add a --package argument\n";
-        return EXIT_FAILURE;
-    }
-
-    int ret = -1;
-
-    if (subcommand == "raw")
-    {
-        ret = ncsiCommandRaw(globalOptions, argc, argv);
-    }
-    else if (subcommand == "oem")
-    {
-        ret = ncsiCommandOEM(globalOptions, argc, argv);
-    }
-    else if (subcommand == "core-dump" || subcommand == "crash-dump")
-    {
-        ret = ncsiCommandReceiveDump(globalOptions, subcommand, argc, argv);
-    }
-    else if (subcommand == "discover")
-    {
-        return ncsiDiscover(globalOptions);
-    }
-    else
-    {
-        std::cerr << "Unknown subcommand '" << subcommand << "'\n";
-        print_usage(progname);
-    }
-
-    return ret ? EXIT_FAILURE : EXIT_SUCCESS;
 }

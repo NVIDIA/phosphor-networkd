@@ -158,9 +158,17 @@ void EthernetInterface::updateInfo(const InterfaceInfo& info, bool skipSignal)
     {
         MacAddressIntf::macAddress(stdplus::toStr(*info.mac), skipSignal);
     }
+    else
+    {
+        MacAddressIntf::macAddress("", skipSignal);
+    }
     if (info.mtu)
     {
         EthernetInterfaceIntf::mtu(*info.mtu, skipSignal);
+    }
+    else
+    {
+        EthernetInterfaceIntf::mtu(0, skipSignal);
     }
     if (ifIdx > 0)
     {
@@ -996,9 +1004,15 @@ std::string EthernetInterface::macAddress([[maybe_unused]] std::string value)
     auto validMAC = stdplus::toStr(newMAC);
 
     // We don't need to update the system if the address is unchanged
-    auto oldMAC =
-        stdplus::fromStr<stdplus::EtherAddr>(MacAddressIntf::macAddress());
-    if (newMAC != oldMAC)
+    auto currentMACStr = MacAddressIntf::macAddress();
+    bool needsUpdate = true;
+    if (!currentMACStr.empty())
+    {
+        auto oldMAC = stdplus::fromStr<stdplus::EtherAddr>(currentMACStr);
+        needsUpdate = (newMAC != oldMAC);
+    }
+
+    if (needsUpdate)
     {
         // Update everything that depends on the MAC value
         for (const auto& [_, intf] : manager.get().interfaces)
