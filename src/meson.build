@@ -44,24 +44,26 @@ phosphor_logging_dep = dependency(
 )
 
 
-executable(
-    'ncsi-mctp',
-    'ncsi_mctp_argument.cpp',
-    'ncsi_mctp_main.cpp',
-    'ncsi_mctp_util.cpp',
-    'ncsi_mctp.cpp',
-    'ncsi_instance_id.cpp',
-    implicit_include_directories: false,
-    include_directories: src_includes,
-    dependencies: [
-        dependency('libnl-3.0'),
-        dependency('libnl-genl-3.0'),
-        phosphor_dbus_interfaces_dep,
-        phosphor_logging_dep,
-    ],
-    install: true,
-    install_dir: get_option('bindir'),
-)
+if get_option('ncsi-mctp').allowed()
+    executable(
+        'ncsi-mctp',
+        'ncsi_mctp_argument.cpp',
+        'ncsi_mctp_main.cpp',
+        'ncsi_mctp_util.cpp',
+        'ncsi_mctp.cpp',
+        'ncsi_instance_id.cpp',
+        implicit_include_directories: false,
+        include_directories: src_includes,
+        dependencies: [
+            dependency('libnl-3.0'),
+            dependency('libnl-genl-3.0'),
+            phosphor_dbus_interfaces_dep,
+            phosphor_logging_dep,
+        ],
+        install: true,
+        install_dir: get_option('bindir'),
+    )
+endif
 
 json_dep = declare_dependency()
 
@@ -98,6 +100,7 @@ networkd_lib = static_library(
     'dhcp_configuration.cpp',
     'dns_updater.cpp',
     'network_monitor.cpp',
+    'hostname_manager.cpp',
     implicit_include_directories: false,
     include_directories: src_includes,
     dependencies: networkd_deps,

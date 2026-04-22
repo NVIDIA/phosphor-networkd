@@ -1,5 +1,7 @@
 #include "hyp_network_manager.hpp"
 
+#include "hyp_ethernet_interface.hpp"
+
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/elog.hpp>
 #include <phosphor-logging/lg2.hpp>
@@ -13,6 +15,7 @@ namespace phosphor
 {
 namespace network
 {
+using namespace phosphor::logging;
 using InternalFailure =
     sdbusplus::xyz::openbmc_project::Common::Error::InternalFailure;
 
@@ -33,13 +36,7 @@ auto HypNetworkMgr::getDBusProp(const std::string& objectName,
         "org.freedesktop.DBus.Properties", "Get");
     properties.append(interface);
     properties.append(kw);
-    auto result = bus.call(properties);
-
-    if (result.is_method_error())
-    {
-        throw std::runtime_error("Get api failed");
-    }
-    return result;
+    return bus.call(properties);
 }
 
 void HypNetworkMgr::setBIOSTableAttr(
@@ -104,20 +101,19 @@ void HypNetworkMgr::setBIOSTableAttrs()
         interfaces.emplace_back(biosMgrIntf);
         auto depth = 0;
 
-        auto mapperCall =
-            bus.new_method_call(mapperBus, mapperObj, mapperIntf, "GetSubTree");
+        auto mapperCall = bus.get().new_method_call(mapperBus, mapperObj,
+                                                    mapperIntf, "GetSubTree");
 
         mapperCall.append(biosMgrObj, depth, interfaces);
 
-        auto mapperReply = bus.call(mapperCall);
+        auto mapperReply = mapperCall.call();
         if (mapperReply.is_method_error())
         {
             lg2::error("Error in mapper call");
             elog<InternalFailure>();
         }
 
-        ObjectTree objectTree;
-        mapperReply.read(objectTree);
+        auto objectTree = mapperReply.unpack<ObjectTree>();
 
         if (objectTree.empty())
         {
@@ -158,8 +154,8 @@ void HypNetworkMgr::setBIOSTableAttrs()
             }
         }
 
-        std::variant<BiosBaseTableType> response;
-        getDBusProp(objPath, biosMgrIntf, "BaseBIOSTable").read(response);
+        auto response = getDBusProp(objPath, biosMgrIntf, "BaseBIOSTable")
+                            .unpack<std::variant<BiosBaseTableType>>();
 
         const BiosBaseTableType* baseBiosTable =
             std::get_if<BiosBaseTableType>(&response);
@@ -229,19 +225,28 @@ void HypNetworkMgr::createIfObjects()
     // network configurations on the both.
     // create eth0 and eth1 objects
     lg2::info("Creating eth0 and eth1 objects");
-    interfaces.emplace("eth0",
-                       std::make_unique<HypEthInterface>(
-                           bus, (objectPath + "/eth0").c_str(), "eth0", *this));
-    interfaces.emplace("eth1",
-                       std::make_unique<HypEthInterface>(
-                           bus, (objectPath + "/eth1").c_str(), "eth1", *this));
+    interfaces.emplace(
+        "eth0",
+        std::make_unique<HypEthInterface>(
+            bus, sdbusplus::object_path(objectPath.str + "/eth0"),
+            "eth0", *this));
+    interfaces.emplace(
+        "eth1",
+        std::make_unique<HypEthInterface>(
+            bus, sdbusplus::object_path(objectPath.str + "/eth1"),
+            "eth1", *this));
+
+    // Create ip address objects for each ethernet interface
+    interfaces["eth0"]->createIPAddressObjects();
+    interfaces["eth1"]->createIPAddressObjects();
 }
 
 void HypNetworkMgr::createSysConfObj()
 {
     systemConf.reset(nullptr);
-    this->systemConf =
-        std::make_unique<HypSysConfig>(bus, objectPath + "/config", *this);
+    this->systemConf = std::make_unique<HypSysConfig>(
+        bus, sdbusplus::object_path(objectPath.str + "/config"),
+        *this);
 }
 
 } // namespace network

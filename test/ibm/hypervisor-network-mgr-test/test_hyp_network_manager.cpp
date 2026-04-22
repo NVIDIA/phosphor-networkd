@@ -1,3 +1,4 @@
+#include "hyp_ethernet_interface.hpp"
 #include "hyp_network_manager.hpp"
 
 #include <net/if.h>
@@ -15,7 +16,7 @@ namespace network
 class TestHypNetworkManager : public testing::Test
 {
   public:
-    sdbusplus::bus_t bus;
+    stdplus::Pinned<sdbusplus::bus_t> bus;
     HypNetworkMgr manager;
     TestHypNetworkManager() :
         bus(sdbusplus::bus::new_default()),

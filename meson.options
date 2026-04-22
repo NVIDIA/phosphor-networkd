@@ -48,3 +48,9 @@ option(
     value: '',
     description: 'dhcp vendor class identification to be set the network configuration',
 )
+option(
+    'ncsi-mctp',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Build the ncsi-mctp utility (requires libmctp)',
+)

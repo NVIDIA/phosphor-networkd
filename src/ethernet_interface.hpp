@@ -53,7 +53,7 @@ using StaticGatewayIntf =
     sdbusplus::xyz::openbmc_project::Network::server::StaticGateway;
 
 using ServerList = std::vector<std::string>;
-using ObjectPath = sdbusplus::message::object_path;
+using ObjectPath = sdbusplus::object_path;
 
 class Manager;
 
@@ -107,6 +107,7 @@ class EthernetInterface : public Ifaces
     void addAddr(const AddressInfo& info);
     void addStaticNeigh(const NeighborInfo& info);
     void addStaticGateway(const StaticGatewayInfo& info);
+
     /** @brief Updates the interface information based on new InterfaceInfo */
     void updateInfo(const InterfaceInfo& info, bool skipSignal = false);
 
@@ -136,7 +137,7 @@ class EthernetInterface : public Ifaces
     /** @brief Function to create static route dbus object.
      *  @param[in] destination - Destination IP address.
      *  @param[in] gateway - Gateway
-     *  @parma[in] prefixLength - Number of network bits.
+     *  @param[in] prefixLength - Number of network bits.
      */
     ObjectPath staticGateway(std::string gateway,
                              IP::Protocol protocolType) override;
@@ -242,7 +243,7 @@ class EthernetInterface : public Ifaces
     using EthernetInterfaceIntf::emitLLDP;
 
   protected:
-    /** @brief get the NTP server list from the timsyncd dbus obj
+    /** @brief get the NTP server list from the timesyncd dbus obj
      *
      */
     virtual ServerList getNTPServerFromTimeSyncd();

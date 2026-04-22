@@ -76,8 +76,8 @@ void setFirstBootMACOnInterface(const std::string& intf, const std::string& mac)
     }
 }
 
-stdplus::EtherAddr getfromInventory(sdbusplus::bus_t& bus,
-                                    const std::string& intfName)
+auto getFromInventory(sdbusplus::bus_t& bus, const std::string& intfName)
+    -> std::optional<stdplus::EtherAddr>
 {
     std::string interfaceName = configJson[intfName];
 
@@ -91,21 +91,32 @@ stdplus::EtherAddr getfromInventory(sdbusplus::bus_t& bus,
 
     mapperCall.append(invRoot, depth, interfaces);
 
-    auto mapperReply = bus.call(mapperCall);
-    if (mapperReply.is_method_error())
+    auto mapperReply = [&]() {
+        try
+        {
+            return bus.call(mapperCall);
+        }
+        catch (const sdbusplus::exception::SdBusError& e)
+        {
+            // Mapper may give an exception when there are no results.  Turn
+            // it into an empty message.
+            lg2::warning("Error in mapper call");
+            return sdbusplus::message_t{};
+        }
+    }();
+
+    if (!mapperReply)
     {
-        lg2::error("Error in mapper call");
-        elog<InternalFailure>();
+        return std::nullopt;
     }
 
-    ObjectTree objectTree;
-    mapperReply.read(objectTree);
+    auto objectTree = mapperReply.unpack<ObjectTree>();
 
     if (objectTree.empty())
     {
-        lg2::error("No Object has implemented the interface {NET_INTF}",
-                   "NET_INTF", invNetworkIntf);
-        elog<InternalFailure>();
+        lg2::warning("No Object has implemented the interface {NET_INTF}",
+                     "NET_INTF", invNetworkIntf);
+        return std::nullopt;
     }
 
     DbusObjectPath objPath;
@@ -124,8 +135,7 @@ stdplus::EtherAddr getfromInventory(sdbusplus::bus_t& bus,
         {
             lg2::info("Get info on interface {NET_INTF}, object {OBJ}",
                       "NET_INTF", interfaceName, "OBJ", object.first);
-
-            if (std::string::npos != object.first.find(interfaceName.c_str()))
+            if (object.first.ends_with("/" + interfaceName))
             {
                 objPath = object.first;
                 service = object.second.begin()->first;
@@ -146,17 +156,22 @@ stdplus::EtherAddr getfromInventory(sdbusplus::bus_t& bus,
 
     method.append(invNetworkIntf, "MACAddress");
 
-    auto reply = bus.call(method);
-    if (reply.is_method_error())
-    {
-        lg2::error(
-            "Failed to get MACAddress for path {DBUS_PATH} interface {DBUS_INTF}",
-            "DBUS_PATH", objPath, "DBUS_INTF", invNetworkIntf);
-        elog<InternalFailure>();
-    }
+    auto reply = [&]() {
+        try
+        {
+            return bus.call(method);
+        }
+        catch (const sdbusplus::exception::SdBusError& e)
+        {
+            lg2::error(
+                "Failed to get MACAddress for path {DBUS_PATH} interface {DBUS_INTF}",
+                "DBUS_PATH", objPath, "DBUS_INTF", invNetworkIntf);
+            elog<InternalFailure>();
+        }
+    }();
 
-    std::variant<std::string> value;
-    reply.read(value);
+    auto value = reply.unpack<std::variant<std::string>>();
+
     return stdplus::fromStr<stdplus::EtherAddr>(std::get<std::string>(value));
 }
 
@@ -164,37 +179,33 @@ bool setInventoryMACOnSystem(sdbusplus::bus_t& bus, const std::string& intfname)
 {
     try
     {
-        auto inventoryMAC = getfromInventory(bus, intfname);
-        if (inventoryMAC != stdplus::EtherAddr{})
-        {
-            auto macStr = stdplus::toStr(inventoryMAC);
-            lg2::info(
-                "Mac Address {NET_MAC} in Inventory on Interface {NET_INTF}",
-                "NET_MAC", macStr, "NET_INTF", intfname);
-            setFirstBootMACOnInterface(intfname, macStr);
-            first_boot_status.push_back(intfname);
-            bool status = true;
-            for (const auto& keys : configJson.items())
-            {
-                if (!(std::find(first_boot_status.begin(),
-                                first_boot_status.end(), keys.key()) !=
-                      first_boot_status.end()))
-                {
-                    lg2::info("Interface {NET_INTF} MAC is NOT set from VPD",
-                              "NET_INTF", keys.key());
-                    status = false;
-                }
-            }
-            if (status)
-            {
-                lg2::info("Removing the match for ethernet interfaces");
-                EthInterfaceMatch = nullptr;
-            }
-        }
-        else
+        auto inventoryMAC = getFromInventory(bus, intfname);
+        if (!inventoryMAC)
         {
             lg2::info("Nothing is present in Inventory");
             return false;
+        }
+
+        auto macStr = stdplus::toStr(*inventoryMAC);
+        lg2::info("Mac Address {NET_MAC} in Inventory on Interface {NET_INTF}",
+                  "NET_MAC", macStr, "NET_INTF", intfname);
+        setFirstBootMACOnInterface(intfname, macStr);
+        first_boot_status.push_back(intfname);
+        bool status = true;
+        for (const auto& keys : configJson.items())
+        {
+            if (!(std::find(first_boot_status.begin(), first_boot_status.end(),
+                            keys.key()) != first_boot_status.end()))
+            {
+                lg2::info("Interface {NET_INTF} MAC is NOT set from VPD",
+                          "NET_INTF", keys.key());
+                status = false;
+            }
+        }
+        if (status)
+        {
+            lg2::info("Removing the match for ethernet interfaces");
+            EthInterfaceMatch = nullptr;
         }
     }
     catch (const std::exception& e)
@@ -216,12 +227,12 @@ void registerSignals(sdbusplus::bus_t& bus)
                  std::map<DbusInterface, std::variant<PropertyValue>>>
             interfacesProperties;
 
-        sdbusplus::message::object_path objPath;
+        sdbusplus::object_path objPath;
         m.read(objPath, interfacesProperties);
 
         for (const auto& pattern : configJson.items())
         {
-            if (objPath.str.find(pattern.value()) != std::string::npos)
+            if (objPath.str.ends_with("/" + pattern.value().get<std::string>()))
             {
                 for (auto& interface : interfacesProperties)
                 {
@@ -289,7 +300,7 @@ void watchEthernetInterface(sdbusplus::bus_t& bus)
                  std::map<DbusInterface, std::variant<PropertyValue>>>
             interfacesProperties;
 
-        sdbusplus::message::object_path objPath;
+        sdbusplus::object_path objPath;
         std::pair<std::string, std::string> ethPair;
         m.read(objPath, interfacesProperties);
 

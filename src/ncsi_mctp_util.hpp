@@ -46,7 +46,7 @@ using Value =
                  uint64_t, double, std::string, std::vector<uint8_t>>;
 using PropertyMap = std::map<Property, Value>;
 using InterfaceMap = std::map<Interface, PropertyMap>;
-using ObjectValueTree = std::map<sdbusplus::message::object_path, InterfaceMap>;
+using ObjectValueTree = std::map<sdbusplus::object_path, InterfaceMap>;
 
 /**
  * @ncsi_requester_log_level_t: Requester Log level.

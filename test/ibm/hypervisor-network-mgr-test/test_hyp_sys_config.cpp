@@ -1,3 +1,4 @@
+#include "hyp_ethernet_interface.hpp"
 #include "mock_hyp_sys_config.hpp"
 
 #include <net/if.h>
@@ -15,13 +16,15 @@ namespace network
 class TestHypSysConfig : public testing::Test
 {
   public:
-    sdbusplus::bus_t bus;
+    stdplus::Pinned<sdbusplus::bus_t> bus;
     HypNetworkMgr manager;
     MockHypSysConfig sysConfigObj;
     TestHypSysConfig() :
         bus(sdbusplus::bus::new_default()),
         manager(bus, "/xyz/openbmc_test/network/hypervisor"),
-        sysConfigObj(bus, "/xyz/openbmc_test/network/hypervisor/config",
+        sysConfigObj(bus,
+                     sdbusplus::object_path(
+                         "/xyz/openbmc_test/network/hypervisor/config"),
                      manager)
     {
         manager.setDefaultHostnameInBIOSTableAttrs();

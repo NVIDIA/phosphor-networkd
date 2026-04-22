@@ -48,10 +48,13 @@ test_dep = declare_dependency(
 
 tests = [
     'config_parser',
+    'dhcp_configuration',
     'ethernet_interface',
     'netlink',
     'network_manager',
     'rtnetlink',
+    'static_gateway',
+    'system_queries',
     'types',
     'util',
     'network_monitor',
