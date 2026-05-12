@@ -60,7 +60,7 @@ Manager::Manager(stdplus::PinnedRef<sdbusplus::bus_t> bus,
             try
             {
                 m.read(intf, values);
-                auto it = values.find("AdministrativeState");
+                auto it = values.find("OperationalState");
                 if (it == values.end())
                 {
                     return;
@@ -74,11 +74,11 @@ Manager::Manager(stdplus::PinnedRef<sdbusplus::bus_t> bus,
                 auto ifidx =
                     stdplus::StrToInt<10, uint16_t>{}(obj.substr(sep + 3));
                 const auto& state = std::get<std::string>(it->second);
-                man.get().handleAdminState(state, ifidx);
+                man.get().handleOperState(state, ifidx);
             }
             catch (const std::exception& e)
             {
-                lg2::error("AdministrativeState match parsing failed: {ERROR}",
+                lg2::error("OperationalState match parsing failed: {ERROR}",
                            "ERROR", e);
             }
         })
@@ -152,11 +152,11 @@ Manager::Manager(stdplus::PinnedRef<sdbusplus::bus_t> bus,
         auto req =
             bus.get().new_method_call("org.freedesktop.network1", obj.c_str(),
                                       "org.freedesktop.DBus.Properties", "Get");
-        req.append("org.freedesktop.network1.Link", "AdministrativeState");
+        req.append("org.freedesktop.network1.Link", "OperationalState");
         auto rsp = req.call();
         std::variant<std::string> val;
         rsp.read(val);
-        handleAdminState(std::get<std::string>(val), ifidx);
+        handleOperState(std::get<std::string>(val), ifidx);
     }
 
     std::filesystem::create_directories(confDir);
@@ -243,10 +243,9 @@ void Manager::addInterface(const InterfaceInfo& info)
         infoIt = std::get<0>(intfInfo.emplace(info.idx, AllIntfInfo{info}));
     }
 
-    if (auto it = systemdNetworkdEnabled.find(info.idx);
-        it != systemdNetworkdEnabled.end())
+    if (systemdNetworkdOperState.contains(info.idx))
     {
-        createInterface(infoIt->second, it->second);
+        createInterface(infoIt->second, isEnabled(info.idx));
     }
 }
 
@@ -289,6 +288,7 @@ void Manager::removeInterface(const InterfaceInfo& info)
         interfaces.erase(nit);
     }
     intfInfo.erase(info.idx);
+    systemdNetworkdOperState.erase(info.idx);
 }
 
 void Manager::addAddress(const AddressInfo& info)
@@ -505,21 +505,32 @@ void Manager::writeToConfigurationFile()
     }
 }
 
-void Manager::handleAdminState(std::string_view state, unsigned ifidx)
+void Manager::handleOperState(std::string_view state, unsigned ifidx)
 {
-    if (state == "initialized" || state == "linger")
+    systemdNetworkdOperState.insert_or_assign(ifidx, std::string(state));
+    bool enabled = isEnabled(ifidx);
+
+    // If the interface already exists, keep its NICEnabled property in sync
+    // with the live OperationalState. We use the base-class setter so that
+    // the property-changed signal is emitted but the override's side effects
+    // (writing the config file and reloading networkd) are skipped, since
+    // this update reflects networkd state rather than a user-driven request.
+    if (auto it = interfacesByIdx.find(ifidx); it != interfacesByIdx.end())
     {
-        systemdNetworkdEnabled.erase(ifidx);
+        it->second->EthernetInterfaceIntf::nicEnabled(enabled);
     }
-    else
+    // Otherwise this is the first state we've seen for this link; create the
+    // interface object if its netlink info is already known.
+    else if (auto it = intfInfo.find(ifidx); it != intfInfo.end())
     {
-        bool managed = state != "unmanaged";
-        systemdNetworkdEnabled.insert_or_assign(ifidx, managed);
-        if (auto it = intfInfo.find(ifidx); it != intfInfo.end())
-        {
-            createInterface(it->second, managed);
-        }
+        createInterface(it->second, enabled);
     }
+}
+
+bool Manager::isEnabled(unsigned ifidx) const
+{
+    auto it = systemdNetworkdOperState.find(ifidx);
+    return it != systemdNetworkdOperState.end() && it->second != "off";
 }
 
 void Manager::writeLLDPDConfigurationFile()
