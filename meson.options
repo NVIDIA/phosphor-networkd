@@ -48,3 +48,15 @@ option(
     value: '',
     description: 'dhcp vendor class identification to be set the network configuration',
 )
+option(
+    'ncsi-mctp',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Build the ncsi-mctp utility (requires libmctp)',
+)
+option(
+    'blocked-interfaces',
+    type: 'array',
+    value: [],
+    description: 'Interface name substrings or prefix whose IP/neighbor/VLAN configuration changes are forbidden (host-BMC reserved links)',
+)
