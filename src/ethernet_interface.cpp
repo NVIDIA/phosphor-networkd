@@ -900,10 +900,8 @@ void EthernetInterface::writeConfigurationFile()
             link["MACAddress"].emplace_back(mac);
         }
 #endif
-        if (!EthernetInterfaceIntf::nicEnabled())
-        {
-            link["ActivationPolicy"].emplace_back("down");
-        }
+        link["ActivationPolicy"].emplace_back(
+            EthernetInterfaceIntf::nicEnabled() ? "up" : "down");
     }
     {
         auto& network = config.map["Network"].emplace_back();

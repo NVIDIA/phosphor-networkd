@@ -158,16 +158,19 @@ class Manager : public ManagerIface
     /** @brief Map of interface info for undiscovered interfaces */
     std::unordered_map<unsigned, AllIntfInfo> intfInfo;
 
-    /** @brief Map of enabled interfaces */
-    std::unordered_map<unsigned, bool> systemdNetworkdEnabled;
+    /** @brief Map of last known systemd-networkd OperationalState per ifidx */
+    std::unordered_map<unsigned, std::string> systemdNetworkdOperState;
     sdbusplus::bus::match_t systemdNetworkdEnabledMatch;
 
     /** @brief List of hooks to execute during the next reload */
     std::vector<fu2::unique_function<void()>> reloadPreHooks;
     std::vector<fu2::unique_function<void()>> reloadPostHooks;
 
-    /** @brief Handles the receipt of an administrative state string */
-    void handleAdminState(std::string_view state, unsigned ifidx);
+    /** @brief Handles the receipt of an operational state string */
+    void handleOperState(std::string_view state, unsigned ifidx);
+
+    /** @brief Returns true if the tracked OperationalState is not "off". */
+    bool isEnabled(unsigned ifidx) const;
 
     /** @brief Creates the interface in the maps */
     void createInterface(const AllIntfInfo& info, bool enabled);

@@ -29,8 +29,7 @@ Neighbor::Neighbor(sdbusplus::bus_t& bus, std::string_view objRoot,
     Neighbor(bus, makeObjPath(objRoot, addr), parent, addr, lladdr, state)
 {}
 
-Neighbor::Neighbor(sdbusplus::bus_t& bus,
-                   sdbusplus::object_path objPath,
+Neighbor::Neighbor(sdbusplus::bus_t& bus, sdbusplus::object_path objPath,
                    stdplus::PinnedRef<EthernetInterface> parent,
                    stdplus::InAnyAddr addr, stdplus::EtherAddr lladdr,
                    State state) :

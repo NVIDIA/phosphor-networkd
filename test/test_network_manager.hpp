@@ -38,7 +38,7 @@ struct TestManager : TestManagerData, Manager
         Manager(bus, reloadForManager(), path, dir)
     {}
 
-    using Manager::handleAdminState;
+    using Manager::handleOperState;
 };
 
 } // namespace network

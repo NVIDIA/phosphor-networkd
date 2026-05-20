@@ -301,5 +301,23 @@ TEST_F(TestEthernetInterface, AddMultipleIPv6StaticGateways)
                                      Key(std::string("2004:903:15f:325::1"))));
 }
 
+TEST_F(TestEthernetInterface, WritesActivationPolicyUp)
+{
+    interface.EthernetInterfaceIntf::nicEnabled(true, /*skipSignal=*/true);
+    interface.writeConfigurationFile();
+    config::Parser parser((confDir / "00-bmc-test0.network").native());
+    EXPECT_EQ(parser.map.getValueStrings("Link", "ActivationPolicy"),
+              std::vector<std::string>{"up"});
+}
+
+TEST_F(TestEthernetInterface, WritesActivationPolicyDown)
+{
+    interface.EthernetInterfaceIntf::nicEnabled(false, /*skipSignal=*/true);
+    interface.writeConfigurationFile();
+    config::Parser parser((confDir / "00-bmc-test0.network").native());
+    EXPECT_EQ(parser.map.getValueStrings("Link", "ActivationPolicy"),
+              std::vector<std::string>{"down"});
+}
+
 } // namespace network
 } // namespace phosphor
