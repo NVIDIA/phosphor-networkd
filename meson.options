@@ -54,3 +54,9 @@ option(
     value: 'disabled',
     description: 'Build the ncsi-mctp utility (requires libmctp)',
 )
+option(
+    'blocked-interfaces',
+    type: 'array',
+    value: [],
+    description: 'Interface name substrings or prefix whose IP/neighbor/VLAN configuration changes are forbidden (host-BMC reserved links)',
+)
