@@ -522,10 +522,19 @@ size_t EthernetInterface::mtu(size_t value)
         return value;
     }
     const auto ifname = interfaceName();
-    return EthernetInterfaceIntf::mtu(ignoreError("SetMTU", ifname, old, [&] {
+    try
+    {
         system::setMTU(ifname, value);
-        return value;
-    }));
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("SetMTU failed on {NET_INTF}: {ERROR}", "NET_INTF", ifname,
+                   "ERROR", e);
+        elog<InvalidArgument>(
+            Argument::ARGUMENT_NAME("MTU"),
+            Argument::ARGUMENT_VALUE(stdplus::toStr(value).c_str()));
+    }
+    return EthernetInterfaceIntf::mtu(value);
 }
 
 bool EthernetInterface::nicEnabled(bool value)
