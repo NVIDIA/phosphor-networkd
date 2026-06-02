@@ -208,9 +208,6 @@ struct Parse
             new_warnings.emplace_back(
                 std::format("{}:{}: Key `{}` missing section",
                             filename.get().native(), lineno, k));
-        }
-        if (!new_warnings.empty())
-        {
             warnings.insert(warnings.end(),
                             std::make_move_iterator(new_warnings.begin()),
                             std::make_move_iterator(new_warnings.end()));
