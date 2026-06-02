@@ -376,7 +376,7 @@ static int ncsiCommand(GlobalOptions& options, uint8_t type,
     if (options.verbose)
     {
         std::cout << "Command: type " << std::hex << static_cast<int>(type)
-                  << ", payload " << payload.size()
+                  << std::dec << ", payload " << payload.size()
                   << " bytes: " << toHexStr(payload).data() << std::endl;
     }
 
