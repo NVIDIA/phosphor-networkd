@@ -1174,6 +1174,7 @@ static void normalizeGateway(std::string& gw)
 
 std::string EthernetInterface::defaultGateway(std::string gateway)
 {
+    throwIfBlocked();
     normalizeGateway<stdplus::In4Addr>(gateway);
     if (gateway != defaultGateway())
     {
@@ -1186,6 +1187,7 @@ std::string EthernetInterface::defaultGateway(std::string gateway)
 
 std::string EthernetInterface::defaultGateway6(std::string gateway)
 {
+    throwIfBlocked();
     normalizeGateway<stdplus::In6Addr>(gateway);
     if (gateway != defaultGateway6())
     {
