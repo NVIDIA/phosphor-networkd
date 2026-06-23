@@ -14,7 +14,7 @@ using phosphor::logging::entry;
 using phosphor::logging::level;
 using phosphor::logging::log;
 
-NetworkMonitor::NetworkMonitor(sdbusplus::bus::bus& bus) : bus(bus)
+NetworkMonitor::NetworkMonitor(sdbusplus::bus_t& bus) : bus(bus)
 {
     startup = true;
     lastNtOnlineState = false;
@@ -43,7 +43,7 @@ void NetworkMonitor::registerSignalCallback()
         }
     };
 
-    networkInfMatch = std::make_unique<sdbusplus::bus::match::match>(
+    networkInfMatch = std::make_unique<sdbusplus::bus::match_t>(
         bus,
         "interface='org.freedesktop.DBus.Properties',type='signal',"
         "member='PropertiesChanged',path='/org/freedesktop/network1'",

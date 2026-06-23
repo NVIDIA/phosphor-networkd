@@ -31,7 +31,7 @@ class NetworkMonitor
     /** @brief Constructor
      *  @param[in] bus - sdbus reference.
      */
-    NetworkMonitor(sdbusplus::bus::bus& bus);
+    NetworkMonitor(sdbusplus::bus_t& bus);
 
   private:
     /** @brief manages single registration for network interface
@@ -59,10 +59,10 @@ class NetworkMonitor
     void updateProperties(propertyMapType data);
 
     /** @brief last known network target online state */
-    sdbusplus::bus::bus& bus;
+    sdbusplus::bus_t& bus;
 
     /** @brief match exp for network interface property interface */
-    std::unique_ptr<sdbusplus::bus::match::match> networkInfMatch;
+    std::unique_ptr<sdbusplus::bus::match_t> networkInfMatch;
 
     /** @brief last known network target online state */
     bool lastNtOnlineState;

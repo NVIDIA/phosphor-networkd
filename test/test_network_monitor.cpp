@@ -23,7 +23,7 @@ class TestNetworkMonitor : public testing::Test
 {
   public:
     sdbusplus::SdBusMock sdbus_mock;
-    sdbusplus::bus::bus bus;
+    sdbusplus::bus_t bus;
 
     TestNetworkMonitor() : bus(sdbusplus::get_mocked_new(&sdbus_mock)) {}
 
