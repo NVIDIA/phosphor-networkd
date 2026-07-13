@@ -72,6 +72,11 @@ if get_option('sync-mac')
     main_deps += [dependency('nlohmann_json', include_type: 'system')]
 endif
 
+if get_option('fru-mac').allowed()
+    main_srcs += ['fru_mac.cpp']
+    main_deps += [dependency('nlohmann_json', include_type: 'system')]
+endif
+
 networkd_deps = [
     phosphor_dbus_interfaces_dep,
     dependency('phosphor-logging'),

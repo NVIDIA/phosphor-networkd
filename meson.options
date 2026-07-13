@@ -60,3 +60,9 @@ option(
     value: [],
     description: 'Interface name substrings or prefix whose IP/neighbor/VLAN configuration changes are forbidden (host-BMC reserved links)',
 )
+option(
+    'fru-mac',
+    type: 'feature',
+    value: 'disabled',
+    description: 'nvidia-oem: Read MAC address from FRU EEPROM and apply it on startup',
+)
