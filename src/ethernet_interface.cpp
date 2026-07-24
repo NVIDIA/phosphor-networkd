@@ -7,7 +7,6 @@
 #include "system_queries.hpp"
 #include "util.hpp"
 
-#include <arpa/inet.h>
 #include <fcntl.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
@@ -28,6 +27,7 @@
 #include <regex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 
 namespace phosphor
@@ -69,9 +69,10 @@ inline decltype(std::declval<Func>()()) ignoreError(
     return fallback;
 }
 
-static std::string makeObjPath(std::string_view root, std::string_view intf)
+static sdbusplus::object_path makeObjPath(const sdbusplus::object_path& root,
+                                          std::string_view intf)
 {
-    auto ret = stdplus::strCat(root, "/"sv, intf);
+    auto ret = stdplus::strCat(root.string(), "/"sv, intf);
     std::replace(ret.begin() + ret.size() - intf.size(), ret.end(), '.', '_');
     return ret;
 }
@@ -85,17 +86,19 @@ static bool validIntfIP(Addr a) noexcept
 EthernetInterface::EthernetInterface(
     stdplus::PinnedRef<sdbusplus::bus_t> bus,
     stdplus::PinnedRef<Manager> manager, const AllIntfInfo& info,
-    std::string_view objRoot, const config::Parser& config, bool enabled) :
+    const sdbusplus::object_path& objRoot, const config::Parser& config,
+    bool enabled) :
     EthernetInterface(bus, manager, info, makeObjPath(objRoot, *info.intf.name),
-                      config, enabled)
+                      config, enabled, std::monostate())
 {}
 
 EthernetInterface::EthernetInterface(
     stdplus::PinnedRef<sdbusplus::bus_t> bus,
     stdplus::PinnedRef<Manager> manager, const AllIntfInfo& info,
-    std::string&& objPath, const config::Parser& config, bool enabled) :
-    Ifaces(bus, objPath.c_str(), Ifaces::action::defer_emit), manager(manager),
-    bus(bus), objPath(std::move(objPath))
+    const sdbusplus::object_path& objPath, const config::Parser& config,
+    bool enabled, std::monostate /*unused*/) :
+    Ifaces(bus, objPath, Ifaces::action::defer_emit), manager(manager),
+    bus(bus), objPath(objPath)
 {
     interfaceName(*info.intf.name, true);
     auto dhcpVal = getDHCPValue(config);
@@ -130,12 +133,12 @@ EthernetInterface::EthernetInterface(
     {
         if (!info.intf.parent_idx)
         {
-            std::runtime_error("Missing parent link");
+            throw std::runtime_error("Missing parent link");
         }
-        vlan.emplace(bus, this->objPath.c_str(), info.intf, *this);
+        vlan.emplace(bus, this->objPath, info.intf, *this);
     }
-    dhcp4Conf.emplace(bus, this->objPath + "/dhcp4", *this, DHCPType::v4);
-    dhcp6Conf.emplace(bus, this->objPath + "/dhcp6", *this, DHCPType::v6);
+    dhcp4Conf.emplace(bus, this->objPath / "dhcp4", *this, DHCPType::v4);
+    dhcp6Conf.emplace(bus, this->objPath / "dhcp6", *this, DHCPType::v6);
     for (const auto& [_, addr] : info.addrs)
     {
         addAddr(addr);
@@ -147,6 +150,14 @@ EthernetInterface::EthernetInterface(
     for (const auto& [_, staticGateway] : info.staticGateways)
     {
         addStaticGateway(staticGateway);
+    }
+
+    auto confPath =
+        config::pathForIntfConf(manager.get().getConfDir(), interfaceName());
+
+    if (!std::filesystem::exists(confPath))
+    {
+        writeConfigurationFile();
     }
 }
 
@@ -188,7 +199,7 @@ void EthernetInterface::addAddr(const AddressInfo& info)
         origin = IP::AddressOrigin::DHCP;
     }
 
-#ifdef LINK_LOCAL_AUTOCONFIGURATION
+#if LINK_LOCAL_AUTOCONFIGURATION
     if (info.scope == RT_SCOPE_LINK &&
         std::holds_alternative<stdplus::In6Addr>(info.ifaddr.getAddr()))
     {
@@ -266,9 +277,9 @@ void EthernetInterface::addAddr(const AddressInfo& info)
     auto it = addrs.find(info.ifaddr);
     if (it == addrs.end())
     {
-        addrs.emplace(info.ifaddr, std::make_unique<IPAddress>(
-                                       bus, std::string_view(objPath), *this,
-                                       info.ifaddr, origin));
+        addrs.emplace(info.ifaddr,
+                      std::make_unique<IPAddress>(bus, objPath, *this,
+                                                  info.ifaddr, origin));
     }
     else
     {
@@ -292,9 +303,9 @@ void EthernetInterface::addStaticNeigh(const NeighborInfo& info)
     else
     {
         staticNeighbors.emplace(
-            *info.addr, std::make_unique<Neighbor>(
-                            bus, std::string_view(objPath), *this, *info.addr,
-                            *info.mac, Neighbor::State::Permanent));
+            *info.addr,
+            std::make_unique<Neighbor>(bus, objPath, *this, *info.addr,
+                                       *info.mac, Neighbor::State::Permanent));
     }
 }
 
@@ -303,6 +314,13 @@ void EthernetInterface::addStaticGateway(const StaticGatewayInfo& info)
     if (!info.gateway)
     {
         lg2::error("Missing static gateway on {NET_INTF}", "NET_INTF",
+                   interfaceName());
+        return;
+    }
+
+    if (!info.protocol)
+    {
+        lg2::error("Missing protocol on {NET_INTF}", "NET_INTF",
                    interfaceName());
         return;
     }
@@ -316,6 +334,12 @@ void EthernetInterface::addStaticGateway(const StaticGatewayInfo& info)
     {
         protocolType = IP::Protocol::IPv6;
     }
+    else
+    {
+        lg2::error("Unknown protocol {NET_PROTO} on {NET_INTF}", "NET_PROTO",
+                   *info.protocol, "NET_INTF", interfaceName());
+        return;
+    }
 
     if (auto it = staticGateways.find(*info.gateway);
         it != staticGateways.end())
@@ -324,10 +348,10 @@ void EthernetInterface::addStaticGateway(const StaticGatewayInfo& info)
     }
     else
     {
-        staticGateways.emplace(*info.gateway,
-                               std::make_unique<StaticGateway>(
-                                   bus, std::string_view(objPath), *this,
-                                   *info.gateway, protocolType));
+        staticGateways.emplace(
+            *info.gateway,
+            std::make_unique<StaticGateway>(bus, objPath, *this, *info.gateway,
+                                            protocolType));
     }
 }
 
@@ -397,9 +421,8 @@ ObjectPath EthernetInterface::ip(IP::Protocol protType, std::string ipaddress,
     if (it == addrs.end())
     {
         it = std::get<0>(addrs.emplace(
-            *ifaddr,
-            std::make_unique<IPAddress>(bus, std::string_view(objPath), *this,
-                                        *ifaddr, IP::AddressOrigin::Static)));
+            *ifaddr, std::make_unique<IPAddress>(bus, objPath, *this, *ifaddr,
+                                                 IP::AddressOrigin::Static)));
     }
     else
     {
@@ -450,9 +473,9 @@ ObjectPath EthernetInterface::neighbor(std::string ipAddress,
     if (it == staticNeighbors.end())
     {
         it = std::get<0>(staticNeighbors.emplace(
-            *addr, std::make_unique<Neighbor>(bus, std::string_view(objPath),
-                                              *this, *addr, *lladdr,
-                                              Neighbor::State::Permanent)));
+            *addr,
+            std::make_unique<Neighbor>(bus, objPath, *this, *addr, *lladdr,
+                                       Neighbor::State::Permanent)));
     }
     else
     {
@@ -474,6 +497,19 @@ ObjectPath EthernetInterface::staticGateway(std::string gateway,
                                             IP::Protocol protocolType)
 {
     throwIfBlocked();
+    for (const auto& ip : addrs)
+    {
+        if (ip.second->type() != protocolType)
+        {
+            continue;
+        }
+        if (gateway == ip.second->address())
+        {
+            lg2::error("Static gateway must not match local interface IP");
+            elog<InvalidArgument>(Argument::ARGUMENT_NAME("gateway"),
+                                  Argument::ARGUMENT_VALUE(gateway.c_str()));
+        }
+    }
     std::optional<stdplus::InAnyAddr> addr;
     std::string route;
     try
@@ -503,9 +539,8 @@ ObjectPath EthernetInterface::staticGateway(std::string gateway,
     if (it == staticGateways.end())
     {
         it = std::get<0>(staticGateways.emplace(
-            route,
-            std::make_unique<StaticGateway>(bus, std::string_view(objPath),
-                                            *this, gateway, protocolType)));
+            route, std::make_unique<StaticGateway>(bus, objPath, *this, gateway,
+                                                   protocolType)));
     }
     else
     {
@@ -694,7 +729,7 @@ ServerList EthernetInterface::getNTPServerFromTimeSyncd()
 
         servers = std::get<ServerList>(response);
     }
-    catch (const sdbusplus::exception::SdBusError& e)
+    catch (const sdbusplus::exception_t& e)
     {
         lg2::error("Failed to get NTP server information from "
                    "systemd-timesyncd: {ERROR}",
@@ -772,7 +807,7 @@ ObjectPath EthernetInterface::createVLAN(uint16_t id)
                               Argument::ARGUMENT_VALUE(idStr.c_str()));
     }
 
-    auto objRoot = std::string_view(objPath).substr(0, objPath.rfind('/'));
+    auto objRoot = objPath.parent_path();
     auto macStr = MacAddressIntf::macAddress();
     std::optional<stdplus::EtherAddr> mac;
     if (!macStr.empty())
@@ -814,58 +849,28 @@ ObjectPath EthernetInterface::createVLAN(uint16_t id)
     return ret;
 }
 
-static bool isValidNTPServer(const std::string& ntpServer)
-{
-    // Check for empty or whitespace-only strings
-    if (ntpServer.empty() ||
-        std::all_of(ntpServer.begin(), ntpServer.end(), ::isspace))
-    {
-        return false;
-    }
-
-    // Check for reasonable length limits (RFC 1035 domain name limit)
-    if (ntpServer.length() > 253)
-    {
-        return false;
-    }
-
-    // Try parsing as IPv4 or IPv6 address first
-    try
-    {
-        stdplus::fromStr<stdplus::InAnyAddr>(ntpServer);
-        return true;
-    }
-    catch (const std::exception&)
-    {
-        // Not an IP address, try domain name validation
-        lg2::debug("Invalid NTP server: {NTP_SERVER}", "NTP_SERVER", ntpServer);
-    }
-
-    // Domain name validation: ([-a-zA-Z0-9]+[.]?)+
-    // This regex matches one or more segments of alphanumeric characters and
-    // hyphens, optionally followed by a dot, repeated one or more times
-    static const std::regex domainRegex(R"(^([-a-zA-Z0-9]+\.?)+$)");
-    if (!std::regex_match(ntpServer, domainRegex))
-    {
-        return false;
-    }
-    // Valid domain name
-    return true;
-}
-
 ServerList EthernetInterface::staticNTPServers(ServerList value)
 {
-    for (const auto& ntpServer : value)
+    // Validate and remove duplicates from NTP servers
+    std::vector<std::string> validatedServers;
+    validatedServers.reserve(value.size());
+    for (const auto& server : value)
     {
-        if (!isValidNTPServer(ntpServer))
+        if (!internal::isValidNtpServer(server))
         {
-            lg2::error("Invalid NTP server: {NTP_SERVER}", "NTP_SERVER",
-                       ntpServer);
-            elog<InvalidArgument>(Argument::ARGUMENT_NAME("StaticNTPServers"),
-                                  Argument::ARGUMENT_VALUE(ntpServer.c_str()));
+            lg2::error("Invalid NTP server {NET_NTP}", "NET_NTP", server);
+            elog<InvalidArgument>(Argument::ARGUMENT_NAME("StaticNTPServer"),
+                                  Argument::ARGUMENT_VALUE(server.c_str()));
+        }
+        if (std::find(validatedServers.begin(), validatedServers.end(),
+                      server) == validatedServers.end())
+        {
+            validatedServers.push_back(server);
         }
     }
-    value = EthernetInterfaceIntf::staticNTPServers(std::move(value));
+
+    value =
+        EthernetInterfaceIntf::staticNTPServers(std::move(validatedServers));
 
     writeConfigurationFile();
     manager.get().reloadConfigs();
@@ -920,7 +925,7 @@ void EthernetInterface::writeConfigurationFile()
     config.map["Match"].emplace_back()["Name"].emplace_back(interfaceName());
     {
         auto& link = config.map["Link"].emplace_back();
-#ifdef PERSIST_MAC
+#if PERSIST_MAC
         auto mac = MacAddressIntf::macAddress();
         if (!mac.empty())
         {
@@ -933,7 +938,7 @@ void EthernetInterface::writeConfigurationFile()
     {
         auto& network = config.map["Network"].emplace_back();
         auto& lla = network["LinkLocalAddressing"];
-#ifdef LINK_LOCAL_AUTOCONFIGURATION
+#if LINK_LOCAL_AUTOCONFIGURATION
         lla.emplace_back("yes");
 #else
         lla.emplace_back("no");
@@ -1057,7 +1062,7 @@ std::string EthernetInterface::macAddress([[maybe_unused]] std::string value)
         lg2::error("Tried to set MAC address on VLAN");
         elog<InternalFailure>();
     }
-#ifdef PERSIST_MAC
+#if PERSIST_MAC
     stdplus::EtherAddr newMAC;
     try
     {
@@ -1162,6 +1167,13 @@ static void normalizeGateway(std::string& gw)
         {
             throw std::invalid_argument("Invalid unicast");
         }
+        if constexpr (std::is_same_v<Addr, stdplus::In6Addr>)
+        {
+            if (isIPv6LinkLocal(ip))
+            {
+                throw std::invalid_argument("Link-local address");
+            }
+        }
         gw = stdplus::toStr(ip);
     }
     catch (const std::exception& e)
@@ -1199,9 +1211,9 @@ std::string EthernetInterface::defaultGateway6(std::string gateway)
 }
 
 EthernetInterface::VlanProperties::VlanProperties(
-    sdbusplus::bus_t& bus, stdplus::const_zstring objPath,
+    sdbusplus::bus_t& bus, const sdbusplus::object_path& objPath,
     const InterfaceInfo& info, stdplus::PinnedRef<EthernetInterface> eth) :
-    VlanIfaces(bus, objPath.c_str(), VlanIfaces::action::defer_emit),
+    VlanIfaces(bus, objPath, VlanIfaces::action::defer_emit),
     parentIdx(*info.parent_idx), eth(eth)
 {
     VlanIntf::id(*info.vlan_id, true);

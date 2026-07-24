@@ -25,8 +25,9 @@ static constexpr char propMatch[] =
     "arg0='org.freedesktop.hostname1'";
 
 SystemConfiguration::SystemConfiguration(
-    stdplus::PinnedRef<sdbusplus::bus_t> bus, stdplus::const_zstring objPath) :
-    Iface(bus, objPath.c_str(), Iface::action::defer_emit), bus(bus),
+    stdplus::PinnedRef<sdbusplus::bus_t> bus,
+    const sdbusplus::object_path& objPath) :
+    Iface(bus, objPath, Iface::action::defer_emit), bus(bus),
     hostnamePropMatch(
         bus, propMatch,
         [sc = stdplus::PinnedRef(*this)](sdbusplus::message_t& m) {
@@ -83,14 +84,11 @@ std::string SystemConfiguration::hostName(std::string name)
         method.call();
         return SystemConfigIntf::hostName(std::move(name));
     }
-    catch (const sdbusplus::exception::SdBusError& e)
+    catch (const sdbusplus::exception_t& e)
     {
-        lg2::error("Failed to set hostname {HOSTNAME}: {ERROR} ", "HOSTNAME",
+        lg2::error("Failed to set hostname {HOSTNAME}: {ERROR}", "HOSTNAME",
                    name, "ERROR", e);
-        auto dbusError = e.get_error();
-        if ((dbusError != nullptr) &&
-            (strcmp(dbusError->name,
-                    "org.freedesktop.DBus.Error.InvalidArgs") == 0))
+        if (strcmp(e.name(), "org.freedesktop.DBus.Error.InvalidArgs") == 0)
         {
             elog<InvalidArgument>(Argument::ARGUMENT_NAME("Hostname"),
                                   Argument::ARGUMENT_VALUE(name.c_str()));

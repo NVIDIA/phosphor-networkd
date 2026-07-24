@@ -45,8 +45,8 @@ constexpr auto propIntf = "org.freedesktop.DBus.Properties";
 constexpr auto methodGet = "Get";
 
 Manager* manager = nullptr;
-std::unique_ptr<sdbusplus::bus::match_t> EthInterfaceMatch = nullptr;
-std::unique_ptr<sdbusplus::bus::match_t> MacAddressMatch = nullptr;
+std::unique_ptr<sdbusplus::match> EthInterfaceMatch = nullptr;
+std::unique_ptr<sdbusplus::match> MacAddressMatch = nullptr;
 std::vector<std::string> first_boot_status;
 nlohmann::json configJson;
 
@@ -96,7 +96,7 @@ auto getFromInventory(sdbusplus::bus_t& bus, const std::string& intfName)
         {
             return bus.call(mapperCall);
         }
-        catch (const sdbusplus::exception::SdBusError& e)
+        catch (const sdbusplus::exception_t& e)
         {
             // Mapper may give an exception when there are no results.  Turn
             // it into an empty message.
@@ -161,7 +161,7 @@ auto getFromInventory(sdbusplus::bus_t& bus, const std::string& intfName)
         {
             return bus.call(method);
         }
-        catch (const sdbusplus::exception::SdBusError& e)
+        catch (const sdbusplus::exception_t& e)
         {
             lg2::error(
                 "Failed to get MACAddress for path {DBUS_PATH} interface {DBUS_INTF}",
@@ -232,7 +232,8 @@ void registerSignals(sdbusplus::bus_t& bus)
 
         for (const auto& pattern : configJson.items())
         {
-            if (objPath.str.ends_with("/" + pattern.value().get<std::string>()))
+            if (objPath.string().ends_with(
+                    "/" + pattern.value().get<std::string>()))
             {
                 for (auto& interface : interfacesProperties)
                 {
@@ -263,7 +264,7 @@ void registerSignals(sdbusplus::bus_t& bus)
         }
     };
 
-    MacAddressMatch = std::make_unique<sdbusplus::bus::match_t>(
+    MacAddressMatch = std::make_unique<sdbusplus::match>(
         bus,
         "interface='org.freedesktop.DBus.ObjectManager',type='signal',"
         "member='InterfacesAdded',path='/xyz/openbmc_project/"
@@ -339,7 +340,7 @@ void watchEthernetInterface(sdbusplus::bus_t& bus)
                       (FORCE_SYNC_MAC_FROM_INVENTORY)
                           ? "Force sync enabled"
                           : "First boot file is not present");
-            EthInterfaceMatch = std::make_unique<sdbusplus::bus::match_t>(
+            EthInterfaceMatch = std::make_unique<sdbusplus::match>(
                 bus,
                 "interface='org.freedesktop.DBus.ObjectManager',type='signal',"
                 "member='InterfacesAdded',path='/xyz/openbmc_project/network'",

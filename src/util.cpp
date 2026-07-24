@@ -6,18 +6,23 @@
 #include "types.hpp"
 
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <phosphor-logging/elog-errors.hpp>
 #include <phosphor-logging/lg2.hpp>
+#include <stdplus/net/addr/hostname.hpp>
+#include <stdplus/net/addr/ip.hpp>
 #include <stdplus/numeric/str.hpp>
 #include <stdplus/str/buf.hpp>
 #include <stdplus/str/cat.hpp>
 #include <xyz/openbmc_project/Common/error.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace phosphor
 {
@@ -32,47 +37,102 @@ static constexpr std::string_view lldpdConfigFilePath = "/etc/lldpd.conf";
 namespace internal
 {
 
+static bool isSpace(char c) noexcept
+{
+    return std::isspace(static_cast<unsigned char>(c)) != 0;
+}
+
+bool isValidNtpServer(const std::string& server)
+{
+    // Try IP validation (IPv4 or IPv6)
+    try
+    {
+        stdplus::fromStr<stdplus::InAnyAddr>(server);
+        return true;
+    }
+    catch (...)
+    {
+        // Not an IP, try hostname
+    }
+
+    // Try hostname validation
+    try
+    {
+        stdplus::fromStr<stdplus::Hostname>(server);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 void executeCommandinChildProcess(stdplus::zstring_view path, char** args)
 {
-    using namespace std::string_literals;
+    auto logCmdFailure = [&](std::string_view statusMsg) {
+        stdplus::StrBuf buf;
+        stdplus::strAppend(buf, "`"sv, path, "`"sv);
+        for (size_t i = 0; args[i] != nullptr; ++i)
+        {
+            stdplus::strAppend(buf, " `"sv, args[i], "`"sv);
+        }
+        buf.push_back('\0');
+        lg2::error("Unable to execute command {CMD}: {STATUS}", "CMD",
+                   buf.data(), "STATUS", statusMsg);
+    };
+
     pid_t pid = fork();
 
     if (pid == 0)
     {
         execv(path.c_str(), args);
-        exit(255);
+        _exit(127);
     }
-    else if (pid < 0)
+
+    if (pid < 0)
     {
         auto error = errno;
         lg2::error("Error occurred during fork: {ERRNO}", "ERRNO", error);
         elog<InternalFailure>();
     }
-    else if (pid > 0)
-    {
-        int status;
-        while (waitpid(pid, &status, 0) == -1)
-        {
-            if (errno != EINTR)
-            {
-                status = -1;
-                break;
-            }
-        }
 
-        if (status < 0)
+    int status = 0;
+    while (waitpid(pid, &status, 0) == -1)
+    {
+        if (errno != EINTR)
         {
-            stdplus::StrBuf buf;
-            stdplus::strAppend(buf, "`"sv, path, "`"sv);
-            for (size_t i = 0; args[i] != nullptr; ++i)
-            {
-                stdplus::strAppend(buf, " `"sv, args[i], "`"sv);
-            }
-            buf.push_back('\0');
-            lg2::error("Unable to execute the command {CMD}: {STATUS}", "CMD",
-                       buf.data(), "STATUS", status);
+            auto error = errno;
+            lg2::error("Error occurred during waitpid: {ERRNO}", "ERRNO",
+                       error);
             elog<InternalFailure>();
         }
+    }
+
+    if (WIFSIGNALED(status))
+    {
+        logCmdFailure(stdplus::strCat("terminated by signal "sv,
+                                      std::to_string(WTERMSIG(status))));
+        elog<InternalFailure>();
+    }
+
+    if (!WIFEXITED(status))
+    {
+        logCmdFailure("child terminated abnormally");
+        elog<InternalFailure>();
+    }
+
+    int rc = WEXITSTATUS(status);
+    if (rc != 0)
+    {
+        if (rc == 127)
+        {
+            logCmdFailure("execv failed (exit 127)");
+        }
+        else
+        {
+            logCmdFailure(stdplus::strCat("exit code "sv, std::to_string(rc)));
+        }
+        elog<InternalFailure>();
     }
 }
 
@@ -96,11 +156,11 @@ std::unordered_set<std::string_view> parseInterfaces(
     {
         auto sep = interfaces.find(',');
         auto interface = interfaces.substr(0, sep);
-        while (!interface.empty() && std::isspace(interface.front()))
+        while (!interface.empty() && isSpace(interface.front()))
         {
             interface.remove_prefix(1);
         }
-        while (!interface.empty() && std::isspace(interface.back()))
+        while (!interface.empty() && isSpace(interface.back()))
         {
             interface.remove_suffix(1);
         }
@@ -198,7 +258,7 @@ inline auto systemdParseLast(const config::Parser& config,
 
 bool getIPv6AcceptRA(const config::Parser& config)
 {
-#ifdef ENABLE_IPV6_ACCEPT_RA
+#if ENABLE_IPV6_ACCEPT_RA
     constexpr bool def = true;
 #else
     constexpr bool def = false;

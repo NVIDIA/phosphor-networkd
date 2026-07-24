@@ -6,13 +6,14 @@
 #include <linux/rtnetlink.h>
 #include <linux/sockios.h>
 #include <net/if.h>
+#include <unistd.h>
 
 #include <phosphor-logging/lg2.hpp>
 #include <stdplus/fd/create.hpp>
 #include <stdplus/hash/tuple.hpp>
-#include <stdplus/util/cexec.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <format>
 #include <optional>
 #include <stdexcept>
@@ -186,7 +187,7 @@ bool deleteLinkLocalIPv4ViaNetlink(unsigned ifidx, const stdplus::SubnetAny& ip)
                 rtattr* rta = reinterpret_cast<rtattr*>(req.buf);
                 rta->rta_type = IFA_LOCAL;
                 rta->rta_len = RTA_LENGTH(sizeof(in_addr));
-                std::memcpy(RTA_DATA(rta), &addr, sizeof(in_addr));
+                memcpy(RTA_DATA(rta), &addr, sizeof(in_addr));
 
                 req.nlh.nlmsg_len += rta->rta_len;
 
@@ -203,6 +204,14 @@ bool deleteLinkLocalIPv4ViaNetlink(unsigned ifidx, const stdplus::SubnetAny& ip)
                 ssize_t len = recv(sock, resp.data(), resp.size(), 0);
                 close(sock);
 
+                if (len < 0)
+                {
+                    lg2::error(
+                        "recv failed on netlink socket for ifidx {NET_IFIDX}: {ERROR}",
+                        "NET_IFIDX", ifidx, "ERROR", strerror(errno));
+                    return;
+                }
+
                 if (len >= NLMSG_LENGTH(0))
                 {
                     const nlmsghdr* hdr =
@@ -213,10 +222,10 @@ bool deleteLinkLocalIPv4ViaNetlink(unsigned ifidx, const stdplus::SubnetAny& ip)
                             reinterpret_cast<nlmsgerr*>(NLMSG_DATA(hdr));
                         if (err->error != 0)
                         {
-                            std::ostringstream oss;
-                            oss << "Failed to delete link-local IP on ifidx "
-                                << ifidx << ": " << strerror(-err->error);
-                            success = false;
+                            lg2::error(
+                                "Failed to delete link-local IP on ifidx {NET_IFIDX}: {ERROR}",
+                                "NET_IFIDX", ifidx, "ERROR",
+                                strerror(-err->error));
                             return;
                         }
                     }

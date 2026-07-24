@@ -1,6 +1,6 @@
 #include "config.h"
 
-#ifdef SYNC_MAC_FROM_INVENTORY
+#if SYNC_MAC_FROM_INVENTORY
 #include "inventory_mac.hpp"
 #endif
 #ifdef FRU_MAC
@@ -79,7 +79,7 @@ int main()
     phosphor::network::networkMonitor =
         std::make_unique<phosphor::network::NetworkMonitor>(bus);
 
-#ifdef SYNC_MAC_FROM_INVENTORY
+#if SYNC_MAC_FROM_INVENTORY
     auto runtime = inventory::watch(bus, manager);
 #endif
 #ifdef FRU_MAC

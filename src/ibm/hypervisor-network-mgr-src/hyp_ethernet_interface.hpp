@@ -40,7 +40,7 @@ using ObjectPath = sdbusplus::object_path;
 
 using ipAddrMapType = stdplus::string_umap<std::unique_ptr<HypIPAddress>>;
 
-static std::shared_ptr<sdbusplus::bus::match_t> matchBIOSAttrUpdate;
+static std::shared_ptr<sdbusplus::match> matchBIOSAttrUpdate;
 
 /** @class HypEthernetInterface
  *  @brief Hypervisor Ethernet Interface implementation.
@@ -64,8 +64,8 @@ class HypEthInterface : public CreateIface
     HypEthInterface(stdplus::PinnedRef<sdbusplus::bus_t> bus,
                     sdbusplus::object_path path, std::string_view intfName,
                     stdplus::PinnedRef<HypNetworkMgr> parent) :
-        CreateIface(bus, path.str.c_str(), CreateIface::action::defer_emit),
-        bus(bus), objectPath(std::move(path)), manager(parent)
+        CreateIface(bus, path, CreateIface::action::defer_emit), bus(bus),
+        objectPath(std::move(path)), manager(parent)
     {
         HypEthernetIntf::interfaceName(intfName.data(), true);
         emit_object_added();
