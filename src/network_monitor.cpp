@@ -1,7 +1,7 @@
 
 #include "network_monitor.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <phosphor-logging/log.hpp>
 
