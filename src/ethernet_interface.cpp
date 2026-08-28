@@ -155,7 +155,8 @@ EthernetInterface::EthernetInterface(
     auto confPath =
         config::pathForIntfConf(manager.get().getConfDir(), interfaceName());
 
-    if (!std::filesystem::exists(confPath) && EthernetInterfaceIntf::nicEnabled())
+    if (!std::filesystem::exists(confPath) &&
+        EthernetInterfaceIntf::nicEnabled())
     {
         writeConfigurationFile();
     }
