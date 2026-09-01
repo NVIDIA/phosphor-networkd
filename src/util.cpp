@@ -184,7 +184,19 @@ const std::unordered_set<std::string_view>& getIgnoredInterfaces()
     return ignoredInterfaces;
 }
 
+/** @brief Get the interfaces owned by the platform (STATIC_IF_LIST) */
+const std::unordered_set<std::string_view>& getStaticInterfaces()
+{
+    static auto staticInterfaces = parseInterfaces(STATIC_IF_LIST);
+    return staticInterfaces;
+}
+
 } // namespace internal
+
+bool isStaticInterface(std::string_view intf)
+{
+    return internal::getStaticInterfaces().contains(intf);
+}
 
 std::optional<std::string> interfaceToUbootEthAddr(std::string_view intf)
 {

@@ -210,6 +210,15 @@ class EthernetInterface : public Ifaces
      */
     void writeConfigurationFile();
 
+    /** @brief update the shipped conf file of a platform-owned interface,
+     *         leaving every setting we were not asked to change alone.
+     */
+    void updateStaticIntfConfigurationFile();
+
+    /** @brief remember that D-Bus explicitly changed static IP configuration.
+     */
+    void markStaticAddressConfigChanged();
+
     /** @brief delete all dbus objects.
      */
     void deleteAll() override;
@@ -329,6 +338,13 @@ class EthernetInterface : public Ifaces
     std::optional<VlanProperties> vlan;
 
     std::optional<dhcp::Configuration> dhcp4Conf, dhcp6Conf;
+
+    /** @brief pending explicit static address update from D-Bus.
+     *
+     *  This distinguishes "no static addresses were reported because carrier is
+     *  down" from "the user deleted the last configured static address".
+     */
+    bool staticAddressConfigChanged = false;
 
     friend class TestEthernetInterface;
     friend class TestNetworkManager;

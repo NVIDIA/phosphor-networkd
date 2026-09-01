@@ -54,6 +54,20 @@ constexpr bool isIPv6LinkLocal(const stdplus::In6Addr& addr) noexcept
  */
 std::optional<std::string> interfaceToUbootEthAddr(std::string_view intf);
 
+/** @brief Determine whether an interface's systemd-networkd configuration is
+ *         owned by the platform, i.e. whether it is listed in the
+ *         `static-if-list` build option.
+ *
+ *  Those configuration files ship in the image and describe fixed internal
+ *  links (BMC<->host, BMC<->HMC). They carry settings this daemon does not
+ *  model, so regenerating one from D-Bus state silently drops them. Such
+ *  interfaces must never have their configuration rewritten or removed here.
+ *
+ *  @param[in] intf - interface name
+ *  @return Whether the interface is owned by the platform
+ */
+bool isStaticInterface(std::string_view intf);
+
 /** @brief read the IPv6AcceptRA value from the configuration file
  *  @param[in] config - The parsed configuration.
  */
@@ -113,6 +127,9 @@ std::unordered_set<std::string_view> parseInterfaces(
 
 /** @brief Get the ignored interfaces */
 const std::unordered_set<std::string_view>& getIgnoredInterfaces();
+
+/** @brief Get the interfaces owned by the platform (STATIC_IF_LIST) */
+const std::unordered_set<std::string_view>& getStaticInterfaces();
 
 } // namespace internal
 

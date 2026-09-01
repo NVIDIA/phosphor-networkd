@@ -25,6 +25,7 @@
 #include <filesystem>
 #include <format>
 #include <regex>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -434,6 +435,7 @@ ObjectPath EthernetInterface::ip(IP::Protocol protType, std::string ipaddress,
         it->second->IPIfaces::origin(IP::AddressOrigin::Static);
     }
 
+    markStaticAddressConfigChanged();
     writeConfigurationFile();
     manager.get().reloadConfigs();
 
@@ -920,8 +922,117 @@ static void writeUpdatedTime(const Manager& manager,
     }
 }
 
+void EthernetInterface::updateStaticIntfConfigurationFile()
+{
+    // Update the platform-provided file in place to preserve settings that are
+    // not modeled by phosphor-network.
+    auto path =
+        config::pathForIntfConf(manager.get().getConfDir(), interfaceName());
+    config::Parser config(path);
+    if (!config.getFileExists())
+    {
+        lg2::error("No shipped config to update for interface {NET_INTF}",
+                   "NET_INTF", interfaceName());
+        return;
+    }
+
+    auto& networkSections = config.map["Network"];
+    if (networkSections.empty())
+    {
+        networkSections.emplace_back();
+    }
+    auto& network = networkSections.front();
+
+    auto setKey = [&network](std::string_view key, auto&& values) {
+        config::ValueList list;
+        for (const auto& value : values)
+        {
+            list.emplace_back(value);
+        }
+        network[key] = std::move(list);
+    };
+
+    // Persist NICEnabled with ActivationPolicy so networkd restores the
+    // desired administrative state whenever the configuration is reloaded.
+    auto& links = config.map["Link"];
+    if (links.empty())
+    {
+        links.emplace_back();
+    }
+    links.front()["ActivationPolicy"] = config::ValueList{
+        config::Value(EthernetInterfaceIntf::nicEnabled() ? "up" : "down")};
+
+    setKey("NTP", EthernetInterfaceIntf::staticNTPServers());
+    setKey("DNS", EthernetInterfaceIntf::staticNameServers());
+    setKey("DHCP",
+           std::array{std::string(dhcp4() ? (dhcp6() ? "true" : "ipv4")
+                                          : (dhcp6() ? "ipv6" : "false"))});
+    setKey("IPv6AcceptRA",
+           std::array{std::string(ipv6AcceptRA() ? "true" : "false")});
+
+    // Preserve configured addresses when no static addresses are reported by
+    // netlink, unless a D-Bus request explicitly changed static IP config.
+    std::set<std::string> wanted;
+    for (const auto& addr : addrs)
+    {
+        if (addr.second->origin() == IP::AddressOrigin::Static)
+        {
+            wanted.insert(stdplus::toStr(addr.first));
+        }
+    }
+    if (!wanted.empty() || staticAddressConfigChanged)
+    {
+        auto declared = config.map.getValueStrings("Address", "Address");
+        for (auto& str : config.map.getValueStrings("Network", "Address"))
+        {
+            declared.push_back(std::move(str));
+        }
+        if (wanted != std::set<std::string>(declared.begin(), declared.end()))
+        {
+            auto& addressSections = config.map["Address"];
+            std::erase_if(addressSections, [&wanted](auto& section) {
+                auto it = section.find(config::Key("Address"));
+                return it == section.end() || it->second.empty() ||
+                       !wanted.contains(it->second.back().get());
+            });
+            for (auto& section : networkSections)
+            {
+                section.erase(config::Key("Address"));
+            }
+
+            auto keptAddresses =
+                config.map.getValueStrings("Address", "Address");
+            auto kept = std::set<std::string>(keptAddresses.begin(),
+                                              keptAddresses.end());
+            for (const auto& address : wanted)
+            {
+                if (!kept.contains(address))
+                {
+                    addressSections.emplace_back()["Address"].emplace_back(
+                        address);
+                }
+            }
+        }
+    }
+    config.writeFile(path);
+    staticAddressConfigChanged = false;
+    lg2::info("Updated networkd file: {CFG_FILE}", "CFG_FILE", path);
+    writeUpdatedTime(manager, path);
+}
+
+void EthernetInterface::markStaticAddressConfigChanged()
+{
+    staticAddressConfigChanged = true;
+}
+
 void EthernetInterface::writeConfigurationFile()
 {
+    if (isStaticInterface(interfaceName()))
+    {
+        updateStaticIntfConfigurationFile();
+        return;
+    }
+
     config::Parser config;
     config.map["Match"].emplace_back()["Name"].emplace_back(interfaceName());
     {
@@ -1145,6 +1256,7 @@ void EthernetInterface::deleteAll()
     // clear all the ip on the interface
     addrs.clear();
 
+    markStaticAddressConfigChanged();
     writeConfigurationFile();
     manager.get().reloadConfigs();
 }
