@@ -112,6 +112,7 @@ void IPAddress::delete_()
         }
     }
 
+    parent.get().markStaticAddressConfigChanged();
     parent.get().writeConfigurationFile();
     parent.get().manager.get().reloadConfigs();
 }
