@@ -134,7 +134,7 @@ std::unordered_set<std::string> parseInterfaces(std::string_view interfaces);
 const std::unordered_set<std::string>& getIgnoredInterfaces();
 
 /** @brief Get the interfaces owned by the platform (STATIC_IF_LIST) */
-const std::unordered_set<std::string_view>& getStaticInterfaces();
+const std::unordered_set<std::string>& getStaticInterfaces();
 
 } // namespace internal
 
