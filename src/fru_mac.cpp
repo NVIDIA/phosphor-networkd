@@ -6,6 +6,7 @@
 #include <phosphor-logging/lg2.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -16,6 +17,11 @@ namespace phosphor::network::fru
 {
 
 constexpr auto configFile = "/usr/share/phosphor-network/fru-mac.json";
+// Marker created after the FRU MAC is applied on first boot. Mirrors the
+// firstboot guard in inventory_mac so a runtime-configured MAC (e.g. set via
+// Redfish) survives reboots instead of being overwritten by the FRU MAC on
+// every boot. Lives under /var/lib/network so a factory reset clears it.
+constexpr auto firstBootPath = "/var/lib/network/firstBoot_";
 
 /** Parse a MAC address from raw FRU EEPROM bytes.
  *
@@ -97,6 +103,18 @@ std::unique_ptr<Runtime> watch(stdplus::PinnedRef<sdbusplus::bus_t> /*bus*/,
         return nullptr;
     }
 
+    // Apply the FRU MAC only on first boot. On subsequent boots, honor a MAC
+    // that was configured at runtime (e.g. via Redfish) rather than forcing
+    // the FRU MAC and defeating persistence.
+    const auto markerPath = std::string(firstBootPath) + ifaceName;
+    if (std::filesystem::exists(markerPath))
+    {
+        lg2::info(
+            "fru-mac: firstboot marker present for {INTF}; keeping configured MAC",
+            "INTF", ifaceName);
+        return nullptr;
+    }
+
     try
     {
         std::ifstream eeprom(eepromPath, std::ios::binary);
@@ -125,6 +143,14 @@ std::unique_ptr<Runtime> watch(stdplus::PinnedRef<sdbusplus::bus_t> /*bus*/,
         {
             lg2::warning("fru-mac: configured interface {INTF} not found",
                          "INTF", ifaceName);
+        }
+        else
+        {
+            // Record that the FRU MAC has been applied so later boots do not
+            // overwrite a runtime-configured MAC.
+            std::error_code ec;
+            std::filesystem::create_directories("/var/lib/network", ec);
+            std::ofstream(markerPath).close();
         }
     }
     catch (const std::exception& e)
