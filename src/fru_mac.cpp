@@ -107,7 +107,15 @@ std::unique_ptr<Runtime> watch(stdplus::PinnedRef<sdbusplus::bus_t> /*bus*/,
     // that was configured at runtime (e.g. via Redfish) rather than forcing
     // the FRU MAC and defeating persistence.
     const auto markerPath = std::string(firstBootPath) + ifaceName;
-    if (std::filesystem::exists(markerPath))
+    std::error_code markerEc;
+    const bool markerExists = std::filesystem::exists(markerPath, markerEc);
+    if (markerEc)
+    {
+        lg2::error("fru-mac: failed to check firstboot marker {PATH}: {ERR}",
+                   "PATH", markerPath, "ERR", markerEc.message());
+        return nullptr;
+    }
+    if (markerExists)
     {
         lg2::info(
             "fru-mac: firstboot marker present for {INTF}; keeping configured MAC",
@@ -150,7 +158,28 @@ std::unique_ptr<Runtime> watch(stdplus::PinnedRef<sdbusplus::bus_t> /*bus*/,
             // overwrite a runtime-configured MAC.
             std::error_code ec;
             std::filesystem::create_directories("/var/lib/network", ec);
-            std::ofstream(markerPath).close();
+            if (ec)
+            {
+                lg2::error("fru-mac: failed to create marker directory: {ERR}",
+                           "ERR", ec.message());
+            }
+
+            std::ofstream marker(markerPath);
+            if (!marker)
+            {
+                lg2::error("fru-mac: failed to open firstboot marker {PATH}",
+                           "PATH", markerPath);
+            }
+            else
+            {
+                marker.close();
+                if (!marker)
+                {
+                    lg2::error(
+                        "fru-mac: failed to close firstboot marker {PATH}",
+                        "PATH", markerPath);
+                }
+            }
         }
     }
     catch (const std::exception& e)
