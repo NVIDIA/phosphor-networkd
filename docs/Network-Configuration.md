@@ -82,7 +82,7 @@ busctl get-property xyz.openbmc_project.Network
 xyz.openbmc_project.Network.EthernetInterface DefaultGateway
 
 curl -c cjar -b cjar -k -H "Content-Type: application/json" -X GET
-https://<hostname/ip>/xyz/openbmc_project/network/config/attr/DefaultGateway
+https://<hostname/ip>/xyz/openbmc_project/network/<interface>/attr/DefaultGateway
 ```
 
 #### Set
@@ -95,7 +95,7 @@ xyz.openbmc_project.Network.EthernetInterface DefaultGateway s
 
 curl -c cjar -b cjar -k -H "Content-Type: application/json" -X PUT -d '{"data":
 "x.x.x.x"}'
-https://<hostname/ip>/xyz/openbmc_project/network/config/attr/DefaultGateway
+https://<hostname/ip>/xyz/openbmc_project/network/<interface>/attr/DefaultGateway
 ```
 
 NOTE: Since the system does not allow unpingable gateway address, make sure the
@@ -140,7 +140,7 @@ NOTE: The path component encodes the IP address and prefix length (e.g.
 
 ```sh
 curl -c cjar -b cjar -k -H "Content-Type: application/json" -X DELETE
-https://<hostname/ip>/xyz/openbmc_project/network/eth0/ipv4/fbfc29b
+https://<hostname/ip>/xyz/openbmc_project/network/eth0/<encoded-ip-prefix>
 ```
 
 ### Configure DHCP
@@ -164,7 +164,7 @@ busctl set-property xyz.openbmc_project.Network
 DHCPEnabled s "<DHCP State>"
 
 curl -c cjar -b cjar -k -H "Content-Type: application/json" -X PUT -d '{"data":
-1}' https://<hostname/ip>/xyz/openbmc_project/network/eth0/attr/DHCPEnabled
+"<DHCP State>"}' https://<hostname/ip>/xyz/openbmc_project/network/eth0/attr/DHCPEnabled
 ```
 
 ### Configure MACAddress
