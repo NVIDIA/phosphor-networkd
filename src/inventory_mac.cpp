@@ -250,9 +250,23 @@ void registerSignals(sdbusplus::bus_t& bus)
                                     !std::filesystem::exists(
                                         firstBootPath + pattern.key()))
                                 {
-                                    setFirstBootMACOnInterface(
-                                        pattern.key(),
-                                        std::get<std::string>(property.second));
+                                    // Runs from a noexcept sd-bus callback;
+                                    // an invalid MAC must not abort the
+                                    // daemon.
+                                    try
+                                    {
+                                        setFirstBootMACOnInterface(
+                                            pattern.key(),
+                                            std::get<std::string>(
+                                                property.second));
+                                    }
+                                    catch (const std::exception& e)
+                                    {
+                                        lg2::error(
+                                            "Failed to set the inventory MAC on {NET_INTF}: {ERROR}",
+                                            "NET_INTF", pattern.key(), "ERROR",
+                                            e);
+                                    }
                                 }
                                 break;
                             }

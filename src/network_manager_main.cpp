@@ -3,9 +3,6 @@
 #if SYNC_MAC_FROM_INVENTORY
 #include "inventory_mac.hpp"
 #endif
-#ifdef FRU_MAC
-#include "fru_mac.hpp"
-#endif
 #include "network_manager.hpp"
 #include "network_monitor.hpp"
 #include "rtnetlink_server.hpp"
@@ -81,9 +78,6 @@ int main()
 
 #if SYNC_MAC_FROM_INVENTORY
     auto runtime = inventory::watch(bus, manager);
-#endif
-#ifdef FRU_MAC
-    auto fruRuntime = fru::watch(bus, manager);
 #endif
 
     bus.request_name(DEFAULT_BUSNAME);
