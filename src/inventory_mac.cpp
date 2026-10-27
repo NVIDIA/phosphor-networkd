@@ -24,6 +24,7 @@ namespace phosphor::network::inventory
 
 using phosphor::logging::elog;
 using sdbusplus::xyz::openbmc_project::Common::Error::InternalFailure;
+using sdbusplus::xyz::openbmc_project::Common::Error::InvalidArgument;
 
 using DbusObjectPath = std::string;
 using DbusInterface = std::string;
@@ -250,9 +251,8 @@ void registerSignals(sdbusplus::bus_t& bus)
                                     !std::filesystem::exists(
                                         firstBootPath + pattern.key()))
                                 {
-                                    // Runs from a noexcept sd-bus callback;
-                                    // an invalid MAC must not abort the
-                                    // daemon.
+                                    // An invalid MAC must not abort the
+                                    // daemon; anything else propagates.
                                     try
                                     {
                                         setFirstBootMACOnInterface(
@@ -260,7 +260,7 @@ void registerSignals(sdbusplus::bus_t& bus)
                                             std::get<std::string>(
                                                 property.second));
                                     }
-                                    catch (const std::exception& e)
+                                    catch (const InvalidArgument& e)
                                     {
                                         lg2::error(
                                             "Failed to set the inventory MAC on {NET_INTF}: {ERROR}",
