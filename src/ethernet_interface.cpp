@@ -886,6 +886,13 @@ ServerList EthernetInterface::staticNTPServers(ServerList value)
         }
     }
 
+    // Rewriting the interface file for an unchanged list is not harmless: the
+    // regenerated file lands in the writable overlay and persists. Skip it.
+    if (validatedServers == EthernetInterfaceIntf::staticNTPServers())
+    {
+        return validatedServers;
+    }
+
     value =
         EthernetInterfaceIntf::staticNTPServers(std::move(validatedServers));
 
