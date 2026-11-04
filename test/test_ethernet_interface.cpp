@@ -172,6 +172,31 @@ TEST_F(TestEthernetInterface, addStaticNTPServers)
     EXPECT_EQ(servers, parser.map.getValueStrings("Network", "NTP"));
 }
 
+TEST_F(TestEthernetInterface, staticNTPServersUnchangedDoesNotWrite)
+{
+    ServerList servers = {"10.1.1.1", "10.2.2.2"};
+    EXPECT_CALL(manager.mockReload, schedule()).Times(1);
+    interface.staticNTPServers(servers);
+
+    auto path = confDir / "00-bmc-test0.network";
+    std::filesystem::remove(path);
+
+    // Same list again
+    interface.staticNTPServers(servers);
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST_F(TestEthernetInterface, staticNTPServersEmptyToEmptyDoesNotWrite)
+{
+    // The constructor already wrote the file; drop it before the call
+    auto path = confDir / "00-bmc-test0.network";
+    std::filesystem::remove(path);
+
+    EXPECT_CALL(manager.mockReload, schedule()).Times(0);
+    interface.staticNTPServers({});
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
 TEST_F(TestEthernetInterface, addNTPServers)
 {
     using namespace sdbusplus::xyz::openbmc_project::Common::Error;

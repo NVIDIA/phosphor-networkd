@@ -814,6 +814,14 @@ ServerList EthernetInterface::staticNTPServers(ServerList value)
                                   Argument::ARGUMENT_VALUE(ntpServer.c_str()));
         }
     }
+
+    // Rewriting the interface file for an unchanged list is not harmless: the
+    // regenerated file lands in the writable overlay and persists. Skip it.
+    if (value == EthernetInterfaceIntf::staticNTPServers())
+    {
+        return value;
+    }
+
     value = EthernetInterfaceIntf::staticNTPServers(std::move(value));
 
     writeConfigurationFile();
